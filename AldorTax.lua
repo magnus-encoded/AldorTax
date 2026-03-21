@@ -212,7 +212,13 @@ local function RegisterPrefix()
 end
 
 local function JoinSyncChannel()
-    JoinChannelByName(SYNC_CHANNEL)
+    -- Custom addon channels may not work in all Classic variants.
+    -- Attempt to join but don't treat failure as critical.
+    local ok, err = pcall(JoinChannelByName, SYNC_CHANNEL)
+    if not ok then
+        Log(string.format("|cffffff00AldorTax: JoinChannelByName failed: %s|r", tostring(err)))
+        return
+    end
     local waited = 0
     local attempts = 0
     local poller = CreateFrame("Frame")
@@ -226,11 +232,10 @@ local function JoinSyncChannel()
         elseif waited > 10 then
             attempts = attempts + 1
             if attempts < 3 then
-                -- Retry the join
                 waited = 0
-                JoinChannelByName(SYNC_CHANNEL)
+                pcall(JoinChannelByName, SYNC_CHANNEL)
             else
-                Log("|cffffff00AldorTax: could not join sync channel after 3 attempts|r")
+                Log("|cffffff00AldorTax: sync channel unavailable — syncing via party/raid/guild only|r")
                 self:SetScript("OnUpdate", nil)
             end
         end
@@ -579,11 +584,17 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
     end
 
     -- Periodic auto-broadcast when in Shattrath and sync is valid
+    -- Only broadcast if there's actually someone to send to
     if lastSync > 0 and GetZoneText() == "Shattrath City" then
-        local now = GetTime()
-        if now - lastAutoBroadcast >= AUTO_BROADCAST_INTERVAL then
-            lastAutoBroadcast = now
-            BroadcastSync()
+        local hasRecipient = (settings.syncChannel and syncChanNum > 0)
+            or (settings.syncParty and (UnitInRaid("player") or (GetNumGroupMembers and GetNumGroupMembers() > 0)))
+            or settings.syncGuild
+        if hasRecipient then
+            local now = GetTime()
+            if now - lastAutoBroadcast >= AUTO_BROADCAST_INTERVAL then
+                lastAutoBroadcast = now
+                BroadcastSync()
+            end
         end
     end
 
@@ -1104,8 +1115,11 @@ SlashCmdList["ALDORTAX"] = function(msg)
             end
         end
     elseif msg == "config" then
-        InterfaceOptionsFrame_OpenToCategory("AldorTax")
-        InterfaceOptionsFrame_OpenToCategory("AldorTax")  -- called twice intentionally; Blizzard bug workaround
+        if not optionsPanel then BuildOptionsPanel() end
+        -- Must pass the frame, not the name string. Called twice: known Blizzard
+        -- bug where the first call scrolls to AddOns but doesn't select the addon.
+        InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+        InterfaceOptionsFrame_OpenToCategory(optionsPanel)
     elseif msg:sub(1, 7) == "unblock" then
         local target = msg:sub(9)
         if target ~= "" and AldorTaxDB and AldorTaxDB.blocklist then
