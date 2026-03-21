@@ -36,6 +36,7 @@ local realTimeOffset   = nil
 local syncChanNum      = 0
 local lastAutoBroadcast = 0
 local AUTO_BROADCAST_INTERVAL = 45
+local currentLayerID   = nil   -- zoneID field from a creature GUID; unique per layer/shard
 
 -- ─── Copyable log ─────────────────────────────────────────────────────────────
 
@@ -220,8 +221,9 @@ local function BroadcastSync(realTime)
     local realm = GetRealmName() or ""
     local rt    = realTime or GetRealTime()
     local phase = rt % CYCLE_TIME
-    SendMsg(string.format("S|%d|%.3f|%s|%s|%.3f|%.3f|%.3f|%.3f",
-        MSG_VERSION, phase, name, realm, FALL_TIME, WAIT_AT_BOTTOM, RISE_TIME, WAIT_AT_TOP))
+    local layer = currentLayerID or 0
+    SendMsg(string.format("S|%d|%.3f|%s|%s|%.3f|%.3f|%.3f|%.3f|%d",
+        MSG_VERSION, phase, name, realm, FALL_TIME, WAIT_AT_BOTTOM, RISE_TIME, WAIT_AT_TOP, layer))
 end
 
 local function BroadcastDied()
@@ -267,14 +269,43 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
     end
 
     if msgType == "S" and #parts >= 4 then
-        -- v1: S|ver|phase|name|realm[|fall|bottom|rise|top]
+        -- v1: S|ver|phase|name|realm[|fall|bottom|rise|top|layerID]
         local phase        = tonumber(parts[2])
         local name, realm  = parts[3], parts[4]
         local fall         = tonumber(parts[5])
         local bottom       = tonumber(parts[6])
         local rise         = tonumber(parts[7])
         local top          = tonumber(parts[8])
+        local senderLayer  = tonumber(parts[9])
         if not phase then return end
+        -- If sender is on a different layer and we have user-calibrated local data,
+        -- log any timing divergence for research. Always apply the sync regardless.
+        local hasLocalCalibration = AldorTaxDB and AldorTaxDB.fallTime and AldorTaxDB.riseTime
+        local isDifferentLayer = currentLayerID and senderLayer and senderLayer ~= 0
+                                 and senderLayer ~= currentLayerID
+        if isDifferentLayer then
+            if hasLocalCalibration and fall and rise then
+                local dFall   = math.abs(fall   - FALL_TIME)
+                local dBottom = math.abs((bottom or WAIT_AT_BOTTOM) - WAIT_AT_BOTTOM)
+                local dRise   = math.abs(rise   - RISE_TIME)
+                local dTop    = math.abs((top    or WAIT_AT_TOP)    - WAIT_AT_TOP)
+                local dCycle  = dFall + dBottom + dRise + dTop
+                if dCycle > 0.1 then
+                    Log(string.format(
+                        "|cffffff00AldorTax: Cross-layer sync from %s (layer %d vs %d) — timing differs by %.2fs " ..
+                        "(fall Δ%.2f bottom Δ%.2f rise Δ%.2f top Δ%.2f)|r",
+                        name, senderLayer, currentLayerID, dCycle, dFall, dBottom, dRise, dTop))
+                else
+                    Log(string.format(
+                        "|cff888888AldorTax: Cross-layer sync from %s (layer %d vs %d) — timings match within %.2fs|r",
+                        name, senderLayer, currentLayerID, dCycle))
+                end
+            else
+                Log(string.format(
+                    "|cff888888AldorTax: Cross-layer sync from %s (layer %d vs %d) — no local calibration to compare|r",
+                    name, senderLayer, currentLayerID))
+            end
+        end
         if IsHardBlocked(name, realm) then return end
         if IsSoftBlocked(name, realm) then
             print(string.format("|cffff6600AldorTax: Ignored sync from soft-blocked %s-%s|r", name, realm))
@@ -314,6 +345,7 @@ logicFrame:RegisterEvent("CHAT_MSG_ADDON")
 logicFrame:RegisterEvent("ZONE_CHANGED")
 logicFrame:RegisterEvent("ZONE_CHANGED_INDOORS")
 logicFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+logicFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 
 logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     if event == "ADDON_LOADED" and arg1 == "AldorTax" then
@@ -337,6 +369,21 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 
     elseif event == "CHAT_MSG_ADDON" then
         HandleAddonMessage(arg1, arg2, arg3, arg4)
+
+    elseif event == "PLAYER_TARGET_CHANGED" then
+        if GetZoneText() == "Shattrath City" then
+            local guid = UnitGUID("target")
+            if guid then
+                local unitType, _, _, _, zoneID = strsplit("-", guid)
+                if unitType == "Creature" and zoneID and tonumber(zoneID) then
+                    local newID = tonumber(zoneID)
+                    if newID ~= currentLayerID then
+                        currentLayerID = newID
+                        Log(string.format("|cff888888AldorTax: layer detected (zoneID=%d)|r", currentLayerID))
+                    end
+                end
+            end
+        end
 
     elseif event == "ZONE_CHANGED" or event == "ZONE_CHANGED_INDOORS" or event == "ZONE_CHANGED_NEW_AREA" then
         local zone    = GetZoneText()
