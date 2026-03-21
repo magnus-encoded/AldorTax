@@ -6,3 +6,4 @@ npc
 
 # WoW saved variables (local data)
 *.lua.bak
+log.txt
