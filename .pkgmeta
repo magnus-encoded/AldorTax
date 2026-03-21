@@ -1,0 +1,9 @@
+package-as: AldorTax
+
+ignore:
+  - .github
+  - .gitignore
+  - npc
+  - log.txt
+  - "*.zip"
+  - .claude
