@@ -1,0 +1,23 @@
+name: Package Addon
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release zip
+        run: |
+          mkdir -p AldorTax
+          cp AldorTax.lua AldorTax.toc README.md AldorTax/
+          zip -r AldorTax-${{ github.ref_name }}.zip AldorTax/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AldorTax-${{ github.ref_name }}.zip
