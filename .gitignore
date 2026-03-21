@@ -1,9 +1,15 @@
 # Packaged releases
 *.zip
 
+# Build artifacts (packaging creates AldorTax/ subdirectory)
+AldorTax/
+
 # Research/scratch files
 npc
 
 # WoW saved variables (local data)
 *.lua.bak
 log.txt
+
+# Claude Code local config
+.claude/
