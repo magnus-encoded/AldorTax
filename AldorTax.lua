@@ -23,7 +23,7 @@ local function UpdateCycleTime()
     CYCLE_TIME = FALL_TIME + WAIT_AT_BOTTOM + RISE_TIME + WAIT_AT_TOP
 end
 local ADDON_PREFIX          = "ALDORTAX"
-local MSG_VERSION           = 1
+local MSG_VERSION           = 2
 local SYNC_CHANNEL          = "AldorTaxSync"
 local SOFT_BLOCK_THRESHOLD  = 3     -- death reports to stop auto-applying someone's syncs
 local HARD_BLOCK_THRESHOLD  = 6     -- death reports to permanently ignore
@@ -269,7 +269,8 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
     end
 
     if msgType == "S" and #parts >= 4 then
-        -- v1: S|ver|phase|name|realm[|fall|bottom|rise|top|layerID]
+        -- v1: S|ver|phase|name|realm[|fall|bottom|rise|top]
+        -- v2: S|ver|phase|name|realm|fall|bottom|rise|top|layerID
         local phase        = tonumber(parts[2])
         local name, realm  = parts[3], parts[4]
         local fall         = tonumber(parts[5])
