@@ -1,0 +1,8 @@
+# Packaged releases
+*.zip
+
+# Research/scratch files
+npc
+
+# WoW saved variables (local data)
+*.lua.bak
