@@ -474,6 +474,10 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
             lastProximityCheck = now
             local wasNear = isNearLift
             isNearLift = CheckNearLift()
+            -- Ensure UI exists when alwaysShowUI is on (covers login-in-zone)
+            if settings.alwaysShowUI and not syncUI then
+                syncUI = BuildSyncUI()
+            end
             if syncUI and syncUI.SetCompact then
                 if settings.alwaysShowUI then
                     syncUI.SetCompact(false)
@@ -499,7 +503,7 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         progress          = (GetTime() - lastSync) % CYCLE_TIME
         timeUntilNextDrop = CYCLE_TIME - progress
 
-        local uiVisible = syncUI and syncUI:IsShown()
+        local uiVisible = (syncUI and syncUI:IsShown()) or settings.alwaysShowUI
         if uiVisible then
             warnFrame:Hide()
         elseif status == "on_platform" and timeUntilNextDrop <= WAIT_AT_TOP then
