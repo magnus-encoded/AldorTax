@@ -1,7 +1,7 @@
 ## Interface: 20001, 20003, 20006, 20012, 20100, 20101, 20102, 20103, 20200, 20202, 20203, 20300, 20302, 20303, 20400, 20401, 20402, 20403, 20501, 20502, 20503, 20504, 20505
 ## Title: Aldor Tax
 ## Notes: Tracks the Aldor Rise elevator cycle. Warns when the lift is about to leave. Click to sync timing. Syncs with nearby players automatically.
-## Version: 0.3.0
+## Version: 0.3.3
 ## Author: Fizziness
 ## SavedVariables: AldorTaxDB
 AldorTax.lua
