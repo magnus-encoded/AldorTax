@@ -52,6 +52,7 @@ local settings = {
     syncParty    = true,   -- broadcast sync via party / raid
     syncChannel  = true,   -- broadcast sync via AldorTaxSync custom channel
     syncGuild    = false,  -- broadcast sync via guild
+    autoThank    = true,   -- auto /thank players who warn in /say
 }
 
 -- Forward-declare so the ADDON_LOADED closure (created before the definition) can see it
@@ -388,6 +389,7 @@ logicFrame:RegisterEvent("ZONE_CHANGED_INDOORS")
 logicFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 logicFrame:RegisterEvent("PLAYER_DEAD")
 logicFrame:RegisterEvent("CHAT_MSG_TEXT_EMOTE")
+logicFrame:RegisterEvent("CHAT_MSG_SAY")
 
 logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     if event == "ADDON_LOADED" and arg1 == "AldorTax" then
@@ -419,16 +421,26 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 
     elseif event == "CHAT_MSG_TEXT_EMOTE" then
         if lastSayTime > 0 and (GetTime() - lastSayTime) <= 30 then
-            local msg = arg1 or ""
-            if msg:lower():find("thank") then
-                if AldorTaxDB then
-                    AldorTaxDB.ty = (AldorTaxDB.ty or 0) + 1
-                    if syncUI and syncUI.tyLabel then
-                        syncUI.tyLabel:SetText(tostring(AldorTaxDB.ty))
-                        syncUI.tyLabel:Show()
+            local sender = arg2 or ""
+            if sender ~= UnitName("player") then
+                local msg = arg1 or ""
+                if msg:lower():find("thanks you") then
+                    if AldorTaxDB then
+                        AldorTaxDB.ty = (AldorTaxDB.ty or 0) + 1
+                        if syncUI and syncUI.tyLabel then
+                            syncUI.tyLabel:SetText(tostring(AldorTaxDB.ty))
+                            syncUI.tyLabel:Show()
+                        end
                     end
                 end
             end
+        end
+
+    elseif event == "CHAT_MSG_SAY" then
+        local msg    = arg1 or ""
+        local sender = arg2 or ""
+        if settings.autoThank and sender ~= UnitName("player") and msg:find("^AldorTax: Lift going down in:") then
+            DoEmote("THANK", sender)
         end
 
     elseif event == "ZONE_CHANGED" or event == "ZONE_CHANGED_INDOORS" or event == "ZONE_CHANGED_NEW_AREA" then
@@ -991,8 +1003,17 @@ BuildOptionsPanel = function()
     local cbGuild   = MakeCheckbox(panel, cbChannel, nil, "syncGuild",
         "Guild",          "Broadcast calibration syncs to your guild.")
 
+    -- Behaviour section
+    local behHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    behHdr:SetPoint("TOPLEFT", cbGuild, "BOTTOMLEFT", 0, -16)
+    behHdr:SetText("Behaviour")
+
+    local cbThank   = MakeCheckbox(panel, behHdr, -4, "autoThank",
+        "Auto-thank warnings", "Automatically /thank players who announce lift departures in /say.")
+
     panel:SetScript("OnShow", function()
         cbParty:Refresh(); cbChannel:Refresh(); cbGuild:Refresh()
+        cbThank:Refresh()
     end)
 
     -- Register with Settings API
