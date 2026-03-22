@@ -9,6 +9,8 @@
 - **Click-to-sync** — click any segment of the bar as that phase begins to sync the timer to the live elevator; a 200ms reaction-time offset is applied automatically
 - **Player sync** — timing data is broadcast automatically every 45 seconds while you are in Shattrath, and once more as you leave, so other players running the addon stay in sync without needing to be on the lift
 - **Sync attribution** — the UI shows whether the current timer is local or received from another player
+- **Say Warning button** — click to announce the lift departure countdown in /say so nearby players without the addon can benefit; works outdoors because button clicks are hardware events
+- **Proximity-aware UI** — full panel with labels and buttons when near the lift, compact progress-bar-only mode when elsewhere in Shattrath
 - **Death detection** — dying in Shattrath auto-reports the sync source and clears your timer; repeated deaths from the same source auto-block that player
 - **Settings panel** — Interface > AddOns > AldorTax with checkboxes for sync channels
 - **Copyable log** — all sync events are written to a panel you can select and copy
@@ -56,4 +58,4 @@ Click any segment on the progress bar as that phase begins to sync the addon's t
 
 - Requires **TBC Classic Anniversary** (interface version 20504)
 - Sync messages use the `ALDORTAX` addon message prefix over party/raid, guild, or the `AldorTaxSync` custom channel
-- /say countdown was investigated but is impossible: Blizzard blocks `SendChatMessage("SAY")` outdoors since patch 8.2.5
+- Automated /say countdown from timers is impossible (Blizzard blocks `SendChatMessage("SAY")` from software events outdoors since patch 8.2.5), but the Say Warning button works because button clicks count as hardware events

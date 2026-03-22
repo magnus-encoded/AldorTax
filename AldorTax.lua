@@ -33,6 +33,20 @@ local syncChanNum      = 0
 local lastAutoBroadcast = 0
 local AUTO_BROADCAST_INTERVAL = 45
 
+-- Lift platform centre in Shattrath map-coordinates (C_Map normalised 0–1)
+local LIFT_MAP_X       = 0.4169
+local LIFT_MAP_Y       = 0.3860
+local LIFT_NEAR_YARDS  = 50      -- "near" threshold for full UI mode
+-- Shattrath map is roughly 1200 yards across both axes (Terokkar Forest sub-map).
+-- 50 yards ≈ 50/1200 ≈ 0.042 in normalised coords.
+local LIFT_NEAR_FRAC   = LIFT_NEAR_YARDS / 1200
+
+-- Proximity state: true = near lift, false = far, nil = unknown
+local isNearLift       = nil
+local lastProximityCheck = 0
+local PROXIMITY_CHECK_INTERVAL = 1.0  -- seconds between map-coord polls
+local lastSayTime      = 0
+
 -- User settings (persisted in AldorTaxDB.settings)
 local settings = {
     syncParty    = true,   -- broadcast sync via party / raid
@@ -82,6 +96,35 @@ end
 
 local function GetRealTime()
     return realTimeOffset and (GetTime() + realTimeOffset) or time()
+end
+
+-- ─── Proximity detection ─────────────────────────────────────────────────────
+
+-- Returns true if near the lift, false if far, nil if we can't determine.
+-- Uses C_Map API when available, falls back to subzone name matching.
+local function CheckNearLift()
+    -- Try map-coordinate approach first
+    if C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition then
+        local mapID = C_Map.GetBestMapForUnit("player")
+        if mapID then
+            local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+            if pos then
+                local px, py = pos:GetXY()
+                if px and py and (px ~= 0 or py ~= 0) then
+                    local dx = px - LIFT_MAP_X
+                    local dy = py - LIFT_MAP_Y
+                    local dist = (dx * dx + dy * dy) ^ 0.5
+                    return dist <= LIFT_NEAR_FRAC
+                end
+            end
+        end
+    end
+    -- Fallback: subzone-based detection
+    local subzone = GetSubZoneText()
+    if subzone == "Aldor Rise" or subzone == "Terrace of Light" then
+        return true
+    end
+    return false
 end
 
 -- ─── Sync persistence ─────────────────────────────────────────────────────────
@@ -344,6 +387,7 @@ logicFrame:RegisterEvent("ZONE_CHANGED")
 logicFrame:RegisterEvent("ZONE_CHANGED_INDOORS")
 logicFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 logicFrame:RegisterEvent("PLAYER_DEAD")
+logicFrame:RegisterEvent("CHAT_MSG_TEXT_EMOTE")
 
 logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     if event == "ADDON_LOADED" and arg1 == "AldorTax" then
@@ -355,6 +399,7 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 if settings[k] ~= nil then settings[k] = v end
             end
         end
+        if not AldorTaxDB.ty then AldorTaxDB.ty = 0 end
         RegisterPrefix()
         JoinSyncChannel()
         RestoreSync()
@@ -372,14 +417,33 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             Log("|cffff0000AldorTax: Death detected in Shattrath — sync cleared and reported.|r")
         end
 
+    elseif event == "CHAT_MSG_TEXT_EMOTE" then
+        if lastSayTime > 0 and (GetTime() - lastSayTime) <= 30 then
+            local msg = arg1 or ""
+            if msg:lower():find("thank") then
+                if AldorTaxDB then
+                    AldorTaxDB.ty = (AldorTaxDB.ty or 0) + 1
+                    if syncUI and syncUI.tyLabel then
+                        syncUI.tyLabel:SetText(tostring(AldorTaxDB.ty))
+                        syncUI.tyLabel:Show()
+                    end
+                end
+            end
+        end
+
     elseif event == "ZONE_CHANGED" or event == "ZONE_CHANGED_INDOORS" or event == "ZONE_CHANGED_NEW_AREA" then
-        local zone    = GetZoneText()
-        local subzone = GetSubZoneText()
-        if zone == "Shattrath City" and subzone ~= "Aldor Rise" then
+        local zone = GetZoneText()
+        if zone == "Shattrath City" then
             if not syncUI then syncUI = BuildSyncUI() end
             syncUI:Show()
+            -- Immediately check proximity and apply compact/full mode
+            isNearLift = CheckNearLift()
+            if syncUI.SetCompact then
+                syncUI.SetCompact(not isNearLift)
+            end
         else
             if syncUI then syncUI:Hide() end
+            isNearLift = nil
             -- One final broadcast as we leave, so nearby players keep a good sync
             if lastSync > 0 then BroadcastSync() end
         end
@@ -389,9 +453,21 @@ end)
 -- ─── Warning display (OnUpdate) ───────────────────────────────────────────────
 
 logicFrame:SetScript("OnUpdate", function(self, elapsed)
-    local subzone = GetSubZoneText()
+    -- Periodic proximity check (throttled to once per second)
+    if GetZoneText() == "Shattrath City" then
+        local now = GetTime()
+        if now - lastProximityCheck >= PROXIMITY_CHECK_INTERVAL then
+            lastProximityCheck = now
+            local wasNear = isNearLift
+            isNearLift = CheckNearLift()
+            if syncUI and syncUI.SetCompact and wasNear ~= isNearLift then
+                syncUI.SetCompact(not isNearLift)
+            end
+        end
+    end
+
     local status
-    if subzone == "Aldor Rise" or subzone == "Terrace of Light" then
+    if isNearLift then
         status = "on_platform"
     elseif GetZoneText() == "Shattrath City" then
         status = "approaching"
@@ -458,23 +534,31 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
 end)
 
 -- ─── Sync UI ─────────────────────────────────────────────────────────────────
--- Shows when the player is in Shattrath City (but not Aldor Rise).
+-- Shows when the player is in Shattrath City.
+-- Full mode (near lift): title, source, progress bar, phase labels, say button.
+-- Compact mode (far from lift): just the progress bar and countdown — minimal footprint.
 -- Progress bar: [FALL(red)][BOTTOM(blue)][RISE(yellow)][TOP(green)]
---               with a white cursor tracking current phase.
--- Departed button: records the lift just left the top → local sync + broadcast.
--- I Died button:   reports the current sync source killed you → death report + broadcast.
+--               with a glowing cursor tracking current phase.
+-- Clicking a phase segment = "this phase just started" → local sync + broadcast.
+-- Say Warning: hardware-click /say with time-until-departure (works outdoors).
 
 syncUI = nil  -- forward declaration used by OnUpdate above
 
 function BuildSyncUI()
     if AldorTaxSyncUI then return AldorTaxSyncUI end  -- reuse if already built
 
-    local BAR_W  = 460
-    local BAR_H  = 28
-    local PAD    = 14
+    local BAR_W_FULL    = 460
+    local BAR_W_COMPACT = 280
+    local BAR_H         = 28
+    local PAD           = 12
 
+    -- Current effective bar width (changes with compact mode)
+    local barW     = BAR_W_FULL
+    local isCompact = false
+
+    -- ── Main frame ──────────────────────────────────────────────────────────
     local p = CreateFrame("Frame", "AldorTaxSyncUI", UIParent, "BackdropTemplate")
-    p:SetSize(BAR_W + PAD * 2, 100)
+    p:SetSize(BAR_W_FULL + PAD * 2, 94)
     p:SetPoint("TOP", UIParent, "TOP", 0, -120)
     p:SetFrameStrata("MEDIUM")
     p:SetMovable(true)
@@ -482,51 +566,100 @@ function BuildSyncUI()
     p:RegisterForDrag("LeftButton")
     p:SetScript("OnDragStart", p.StartMoving)
     p:SetScript("OnDragStop",  p.StopMovingOrSizing)
+    -- Sleek dark backdrop: solid dark background with thin golden border
     p:SetBackdrop({
-        bgFile   = "Interface/DialogFrame/UI-DialogBox-Background",
-        edgeFile = "Interface/DialogFrame/UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 8, right = 8, top = 8, bottom = 8 },
+        bgFile   = "Interface/ChatFrame/ChatFrameBackground",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
+    p:SetBackdropColor(0.06, 0.06, 0.10, 0.88)
+    p:SetBackdropBorderColor(0.55, 0.48, 0.28, 0.80)
 
+    -- ── Title (hidden in compact mode) ──────────────────────────────────────
     local title = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    title:SetPoint("TOPLEFT", PAD, -8)
+    title:SetPoint("TOPLEFT", PAD, -7)
     title:SetText("Aldor Lift  |cff888888click phase to sync|r")
     title:SetTextColor(1, 0.82, 0)
+    p.title = title
 
+    -- ── Source label (hidden in compact mode) ───────────────────────────────
     local sourceLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    sourceLabel:SetPoint("TOPRIGHT", -PAD, -8)
+    sourceLabel:SetPoint("TOPRIGHT", -PAD, -7)
     sourceLabel:SetText("no sync")
     sourceLabel:SetTextColor(0.6, 0.6, 0.6)
     p.sourceLabel = sourceLabel
 
+    -- ── Progress bar backing frame (dark inset for depth) ───────────────────
+    local barBg = CreateFrame("Frame", nil, p, "BackdropTemplate")
+    barBg:SetPoint("TOPLEFT", PAD - 2, -24)
+    barBg:SetSize(BAR_W_FULL + 4, BAR_H + 4)
+    barBg:SetBackdrop({
+        bgFile   = "Interface/ChatFrame/ChatFrameBackground",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        tile = true, tileSize = 8, edgeSize = 8,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    barBg:SetBackdropColor(0.02, 0.02, 0.04, 0.90)
+    barBg:SetBackdropBorderColor(0.12, 0.12, 0.16, 0.70)
+    p.barBg = barBg
+
     -- ── Progress bar container ──────────────────────────────────────────────
     local bar = CreateFrame("Frame", nil, p)
-    bar:SetSize(BAR_W, BAR_H)
+    bar:SetSize(BAR_W_FULL, BAR_H)
     bar:SetPoint("TOPLEFT", PAD, -26)
 
     -- Phase definitions: index 0=FALL, 1=BOTTOM, 2=RISE, 3=TOP
+    -- Slightly more saturated / modern colours; alpha 0.85
     local segs = {
-        { t = FALL_TIME,      r = 0.8, g = 0.15, b = 0.1,  name = "FALL"   },
-        { t = WAIT_AT_BOTTOM, r = 0.3, g = 0.45, b = 0.8,  name = "BOTTOM" },
-        { t = RISE_TIME,      r = 0.9, g = 0.7,  b = 0.1,  name = "RISE"   },
-        { t = WAIT_AT_TOP,    r = 0.1, g = 0.75, b = 0.2,  name = "TOP"    },
+        { t = FALL_TIME,      r = 0.85, g = 0.12, b = 0.10, name = "FALL"   },
+        { t = WAIT_AT_BOTTOM, r = 0.22, g = 0.42, b = 0.88, name = "BOTTOM" },
+        { t = RISE_TIME,      r = 0.95, g = 0.72, b = 0.08, name = "RISE"   },
+        { t = WAIT_AT_TOP,    r = 0.10, g = 0.78, b = 0.25, name = "TOP"    },
     }
+
+    local segBtns = {}   -- keep references for resize
 
     local xOff = 0
     for i, s in ipairs(segs) do
-        local w         = (s.t / CYCLE_TIME) * BAR_W
+        local w         = (s.t / CYCLE_TIME) * BAR_W_FULL
         local phaseIdx  = i - 1   -- 0-based
         local phaseName = s.name
 
         local segBtn = CreateFrame("Button", nil, bar)
         segBtn:SetPoint("TOPLEFT", bar, "TOPLEFT", xOff, 0)
         segBtn:SetSize(w, BAR_H)
+        segBtns[i] = segBtn
 
         local tex = segBtn:CreateTexture(nil, "ARTWORK")
         tex:SetColorTexture(s.r, s.g, s.b, 0.85)
         tex:SetAllPoints()
         segBtn:SetHighlightTexture("Interface/Buttons/ButtonHilight-Square", "ADD")
+
+        -- 1px dark border around each segment for definition
+        local borderL = segBtn:CreateTexture(nil, "BORDER")
+        borderL:SetColorTexture(0.0, 0.0, 0.0, 0.70)
+        borderL:SetPoint("TOPLEFT", segBtn, "TOPLEFT", 0, 0)
+        borderL:SetPoint("BOTTOMLEFT", segBtn, "BOTTOMLEFT", 0, 0)
+        borderL:SetWidth(1)
+
+        local borderR = segBtn:CreateTexture(nil, "BORDER")
+        borderR:SetColorTexture(0.0, 0.0, 0.0, 0.70)
+        borderR:SetPoint("TOPRIGHT", segBtn, "TOPRIGHT", 0, 0)
+        borderR:SetPoint("BOTTOMRIGHT", segBtn, "BOTTOMRIGHT", 0, 0)
+        borderR:SetWidth(1)
+
+        local borderT = segBtn:CreateTexture(nil, "BORDER")
+        borderT:SetColorTexture(0.0, 0.0, 0.0, 0.70)
+        borderT:SetPoint("TOPLEFT", segBtn, "TOPLEFT", 0, 0)
+        borderT:SetPoint("TOPRIGHT", segBtn, "TOPRIGHT", 0, 0)
+        borderT:SetHeight(1)
+
+        local borderB = segBtn:CreateTexture(nil, "BORDER")
+        borderB:SetColorTexture(0.0, 0.0, 0.0, 0.70)
+        borderB:SetPoint("BOTTOMLEFT", segBtn, "BOTTOMLEFT", 0, 0)
+        borderB:SetPoint("BOTTOMRIGHT", segBtn, "BOTTOMRIGHT", 0, 0)
+        borderB:SetHeight(1)
 
         segBtn:SetScript("OnClick", function()
             -- Clicking a segment means "this phase just started".
@@ -551,14 +684,15 @@ function BuildSyncUI()
     end
 
     -- Overlay frame above the segment buttons so labels and cursor are visible.
-    -- Child Button frames render above bar's own textures/fonstrings, so we need
+    -- Child Button frames render above bar's own textures/fontstrings, so we need
     -- a separate frame at a higher FrameLevel to hold the cursor and labels.
     local overlay = CreateFrame("Frame", nil, p)
-    overlay:SetSize(BAR_W, BAR_H)
+    overlay:SetSize(BAR_W_FULL, BAR_H)
     overlay:SetPoint("TOPLEFT", PAD, -26)
     overlay:SetFrameLevel(bar:GetFrameLevel() + 10)
 
-    -- Phase labels
+    -- Phase labels (hidden in compact mode)
+    local phaseLabels = {}
     local labelData = {
         { text = "FALL",   frac = (FALL_TIME * 0.5) / CYCLE_TIME },
         { text = "BOTTOM", frac = (FALL_TIME + WAIT_AT_BOTTOM * 0.5) / CYCLE_TIME },
@@ -567,65 +701,161 @@ function BuildSyncUI()
     }
     for _, ld in ipairs(labelData) do
         local lbl = overlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetPoint("CENTER", overlay, "LEFT", ld.frac * BAR_W, 0)
+        lbl:SetPoint("CENTER", overlay, "LEFT", ld.frac * BAR_W_FULL, 0)
         lbl:SetText(ld.text)
         lbl:SetTextColor(1, 1, 1, 0.9)
+        phaseLabels[#phaseLabels + 1] = { fs = lbl, frac = ld.frac }
     end
 
-    -- Cursor (white vertical line)
-    local cursor = overlay:CreateTexture(nil, "OVERLAY")
+    -- ── Cursor with glow / drop shadow ──────────────────────────────────────
+    -- Shadow layer behind the cursor for depth
+    local cursorGlow = overlay:CreateTexture(nil, "OVERLAY", nil, 1)
+    cursorGlow:SetColorTexture(1, 1, 1, 0.25)
+    cursorGlow:SetSize(10, BAR_H + 8)
+    cursorGlow:SetBlendMode("ADD")
+    p.cursorGlow = cursorGlow
+
+    -- Main cursor line (slightly wider: 4px)
+    local cursor = overlay:CreateTexture(nil, "OVERLAY", nil, 2)
     cursor:SetColorTexture(1, 1, 1, 1)
-    cursor:SetSize(3, BAR_H + 6)
+    cursor:SetSize(4, BAR_H + 6)
     cursor:SetPoint("CENTER", overlay, "LEFT", 0, 0)
     p.cursor  = cursor
     p.bar     = bar
     p.overlay = overlay
     p:Hide()
 
-    -- Time-remaining label riding the cursor
+    -- Time-remaining label riding the cursor (with shadow for readability)
     local timeLabel = overlay:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     timeLabel:SetPoint("BOTTOM", cursor, "TOP", 0, 2)
+    timeLabel:SetShadowOffset(1, -1)
+    timeLabel:SetShadowColor(0, 0, 0, 1)
     p.timeLabel = timeLabel
 
-    -- ── I Died button ───────────────────────────────────────────────────────
-    local diedBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    diedBtn:SetSize(130, 26)
-    diedBtn:SetText("I Died")
-    diedBtn:SetPoint("BOTTOM", 0, 12)
-    diedBtn:SetScript("OnClick", function()
-        BroadcastDied()
-        lastSync       = 0
-        lastSyncSource = nil
-        warnFrame:Hide()
-        print("|cffff0000AldorTax: Death reported and sync cleared.|r")
+    -- ── Say Warning button (hardware click → SendChatMessage SAY works outdoors) ─
+    local sayBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    sayBtn:SetSize(130, 24)
+    sayBtn:SetText("|cffffcc00Say Warning|r")
+    sayBtn:SetNormalFontObject("GameFontNormalSmall")
+    sayBtn:SetHighlightFontObject("GameFontHighlightSmall")
+    local sayOverlay = sayBtn:CreateTexture(nil, "ARTWORK", nil, 2)
+    sayOverlay:SetColorTexture(0.7, 0.55, 0.05, 0.25)
+    sayOverlay:SetAllPoints()
+    p.sayBtn = sayBtn
+
+    sayBtn:SetScript("OnClick", function()
+        if lastSync <= 0 then
+            print("|cffff6600AldorTax: No sync — nothing to announce.|r")
+            return
+        end
+        local phase = (GetTime() - lastSync) % CYCLE_TIME
+        local ttd   = CYCLE_TIME - phase
+        SendChatMessage(string.format("AldorTax: Lift going down in: %.1f seconds", ttd), "SAY")
+        lastSayTime = GetTime()
     end)
+
+    -- Initial anchor for say button
+    sayBtn:SetPoint("BOTTOM", p, "BOTTOM", 0, 8)
+
+    -- ── Tiny counter ──────────────────────────────────────────────────────
+    local tyLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    tyLabel:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -8, 6)
+    tyLabel:SetTextColor(0.85, 0.75, 0.35, 0.5)
+    tyLabel:SetText(AldorTaxDB and AldorTaxDB.ty and AldorTaxDB.ty > 0 and tostring(AldorTaxDB.ty) or "")
+    p.tyLabel = tyLabel
+
+    -- ── Compact / full mode toggle ──────────────────────────────────────────
+    -- Compact: only the progress bar and countdown visible, smaller width.
+    -- Full:    title, source label, phase labels, buttons all visible.
+    function p.SetCompact(compact)
+        if compact == isCompact then return end
+        isCompact = compact
+
+        if isCompact then
+            barW = BAR_W_COMPACT
+            p:SetSize(BAR_W_COMPACT + PAD * 2, 50)
+            title:Hide()
+            sourceLabel:Hide()
+            sayBtn:Hide()
+            tyLabel:Hide()
+            for _, pl in ipairs(phaseLabels) do pl.fs:Hide() end
+            -- Shift the bar to the top of the compact frame
+            bar:ClearAllPoints()
+            bar:SetPoint("TOPLEFT", PAD, -12)
+            bar:SetSize(BAR_W_COMPACT, BAR_H)
+            barBg:ClearAllPoints()
+            barBg:SetPoint("TOPLEFT", PAD - 2, -10)
+            barBg:SetSize(BAR_W_COMPACT + 4, BAR_H + 4)
+            overlay:ClearAllPoints()
+            overlay:SetPoint("TOPLEFT", PAD, -12)
+            overlay:SetSize(BAR_W_COMPACT, BAR_H)
+        else
+            barW = BAR_W_FULL
+            p:SetSize(BAR_W_FULL + PAD * 2, 94)
+            title:Show()
+            sourceLabel:Show()
+            sayBtn:Show()
+            if AldorTaxDB and AldorTaxDB.ty and AldorTaxDB.ty > 0 then tyLabel:Show() end
+            for _, pl in ipairs(phaseLabels) do pl.fs:Show() end
+            bar:ClearAllPoints()
+            bar:SetPoint("TOPLEFT", PAD, -26)
+            bar:SetSize(BAR_W_FULL, BAR_H)
+            barBg:ClearAllPoints()
+            barBg:SetPoint("TOPLEFT", PAD - 2, -24)
+            barBg:SetSize(BAR_W_FULL + 4, BAR_H + 4)
+            overlay:ClearAllPoints()
+            overlay:SetPoint("TOPLEFT", PAD, -26)
+            overlay:SetSize(BAR_W_FULL, BAR_H)
+        end
+
+        -- Resize segment buttons to match new bar width
+        local xOff2 = 0
+        for i2, s2 in ipairs(segs) do
+            local w2 = (s2.t / CYCLE_TIME) * barW
+            segBtns[i2]:ClearAllPoints()
+            segBtns[i2]:SetPoint("TOPLEFT", bar, "TOPLEFT", xOff2, 0)
+            segBtns[i2]:SetSize(w2, BAR_H)
+            xOff2 = xOff2 + w2
+        end
+
+        -- Reposition phase labels for current bar width
+        for _, pl in ipairs(phaseLabels) do
+            pl.fs:ClearAllPoints()
+            pl.fs:SetPoint("CENTER", overlay, "LEFT", pl.frac * barW, 0)
+        end
+    end
 
     -- ── Cursor update (called from OnUpdate) ────────────────────────────────
     function p.UpdateCursor()
         if lastSync <= 0 then
-            p.cursor:SetPoint("CENTER", p.overlay, "LEFT", -10, 0)
-            p.timeLabel:SetText("")
-            p.sourceLabel:SetText("|cffff4400no sync|r")
+            cursor:ClearAllPoints()
+            cursor:SetPoint("CENTER", overlay, "LEFT", -10, 0)
+            cursorGlow:ClearAllPoints()
+            cursorGlow:SetPoint("CENTER", cursor, "CENTER", 0, 0)
+            timeLabel:SetText("")
+            sourceLabel:SetText("|cffff4400no sync|r")
             return
         end
 
         local phase = (GetTime() - lastSync) % CYCLE_TIME
-        local xPos  = (phase / CYCLE_TIME) * BAR_W
-        p.cursor:ClearAllPoints()
-        p.cursor:SetPoint("CENTER", p.overlay, "LEFT", xPos, 0)
-        p.timeLabel:SetText(string.format("%.1fs", CYCLE_TIME - phase))
+        local xPos  = (phase / CYCLE_TIME) * barW
+        cursor:ClearAllPoints()
+        cursor:SetPoint("CENTER", overlay, "LEFT", xPos, 0)
+        cursorGlow:ClearAllPoints()
+        cursorGlow:SetPoint("CENTER", cursor, "CENTER", 0, 0)
+        local ttd = CYCLE_TIME - phase
+        timeLabel:SetText(string.format("%.1fs", ttd))
 
         if lastSyncSource then
-            p.sourceLabel:SetText(string.format("|cff88ff88received from %s|r", lastSyncSource.name))
+            sourceLabel:SetText(string.format("|cff88ff88received from %s|r", lastSyncSource.name))
         else
-            p.sourceLabel:SetText("|cff00cc00local|r")
+            sourceLabel:SetText("|cff00cc00local|r")
         end
     end
 
     return p
 end
 
--- ─── Debug panel ─────────────────────────────────────────────────────────────
 
 -- ─── Log panel ───────────────────────────────────────────────────────────────
 
