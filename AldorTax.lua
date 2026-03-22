@@ -11,8 +11,8 @@ warnText:SetScale(2)
 -- ─── Config ───────────────────────────────────────────────────────────────────
 
 local FALL_TIME             = 6.5    -- lift falling: top → bottom (visual/calibration)
-local RISE_TIME             = 7.5    -- lift rising:  bottom → top (visual/calibration)
-local WAIT_AT_TOP           = 6.0
+local RISE_TIME             = 8.5    -- lift rising:  bottom → top (visual/calibration)
+local WAIT_AT_TOP           = 5.0
 local WAIT_AT_BOTTOM        = 5.0
 local CYCLE_TIME            = 25.0   -- fixed: the actual server cycle is 25s
 local APPROACH_WARNING_TIME = 10.0
@@ -57,6 +57,12 @@ local settings = {
 -- /say countdown tracking: which thresholds already announced this departure cycle
 local sayDone    = {}
 local sayCycleN  = -1
+
+-- Resolve SendChatMessage: modern clients move it to C_ChatInfo, Classic keeps the global
+local SafeSendChatMessage = (C_ChatInfo and C_ChatInfo.SendChatMessage) or SendChatMessage
+
+-- Forward-declare so the ADDON_LOADED closure (created before the definition) can see it
+local BuildOptionsPanel
 
 -- ─── Copyable log ─────────────────────────────────────────────────────────────
 
@@ -364,20 +370,17 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     if event == "ADDON_LOADED" and arg1 == "AldorTax" then
         if not AldorTaxDB then AldorTaxDB = {} end
         if not AldorTaxDB.blocklist then AldorTaxDB.blocklist = {} end
-        -- Restore saved segment durations (visual only, CYCLE_TIME stays 25)
+        -- Restore saved segment durations (visual only, CYCLE_TIME stays 25, TOP stays 5)
         if AldorTaxDB.fallTime and AldorTaxDB.riseTime then
             local fall   = AldorTaxDB.fallTime
             local rise   = AldorTaxDB.riseTime
             local bottom = AldorTaxDB.bottomTime or WAIT_AT_BOTTOM
-            local top    = AldorTaxDB.topTime    or WAIT_AT_TOP
             if fall >= segMin[0] and fall <= segMax[0]
                and rise >= segMin[2] and rise <= segMax[2]
-               and bottom >= segMin[1] and bottom <= segMax[1]
-               and top >= segMin[3] and top <= segMax[3] then
+               and bottom >= segMin[1] and bottom <= segMax[1] then
                 FALL_TIME      = fall
                 RISE_TIME      = rise
                 WAIT_AT_BOTTOM = bottom
-                WAIT_AT_TOP    = top
             end
         end
         -- Load saved settings, falling back to defaults
@@ -454,7 +457,7 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         end
     end
 
-    -- /say countdown on Aldor Rise
+    -- /say countdown near the lift (deferred via C_Timer to avoid tainted OnUpdate context)
     if settings.sayCountdown and progress then
         if status == "on_platform" then
             local cycleN = math.floor((GetTime() - lastSync) / CYCLE_TIME)
@@ -462,20 +465,25 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
 
             if timeUntilNextDrop <= 2 and timeUntilNextDrop > 1 and not sayDone[2] then
                 sayDone[2] = true
-                pcall(SendChatMessage, "AldorTax: leaving in 2", "SAY")
+                C_Timer.After(0, function()
+                    local ok, err = pcall(SafeSendChatMessage, "AldorTax: leaving in 2", "SAY")
+                    if not ok then Log("|cffff6600AldorTax: /say failed: " .. tostring(err) .. "|r") end
+                end)
             end
             if timeUntilNextDrop <= 1 and timeUntilNextDrop > 0 and not sayDone[1] then
                 sayDone[1] = true
-                pcall(SendChatMessage, "AldorTax: leaving in 1", "SAY")
+                C_Timer.After(0, function()
+                    local ok, err = pcall(SafeSendChatMessage, "AldorTax: leaving in 1", "SAY")
+                    if not ok then Log("|cffff6600AldorTax: /say failed: " .. tostring(err) .. "|r") end
+                end)
             end
             if progress < 1 and not sayDone["fall"] then
                 sayDone["fall"] = true
-                pcall(SendChatMessage, "AldorTax: falling", "SAY")
+                C_Timer.After(0, function()
+                    local ok, err = pcall(SafeSendChatMessage, "AldorTax: falling", "SAY")
+                    if not ok then Log("|cffff6600AldorTax: /say failed: " .. tostring(err) .. "|r") end
+                end)
             end
-        elseif not sayDone["_diag"] then
-            sayDone["_diag"] = true
-            Log(string.format("|cffffff00AldorTax: sayCountdown on but subzone=%q (need 'Aldor Rise')|r",
-                subzone or "nil"))
         end
     end
 
@@ -606,8 +614,8 @@ function BuildSyncUI()
                         ApplySegmentCalibration("RISE_TIME", measured, RISE_TIME, "riseTime")
                         Log(string.format("|cff00ff00AldorTax: RISE=%.2fs|r", RISE_TIME))
                     elseif lastPhaseIdx == 3 then
-                        ApplySegmentCalibration("WAIT_AT_TOP", measured, WAIT_AT_TOP, "topTime")
-                        Log(string.format("|cff00ff00AldorTax: TOP=%.2fs|r", WAIT_AT_TOP))
+                        -- TOP is fixed at 5s; log the measured value for reference only
+                        Log(string.format("|cff888888AldorTax: TOP measured %.2fs (fixed at %.1fs)|r", measured, WAIT_AT_TOP))
                     end
                 else
                     Log(string.format("|cffffff00AldorTax: %s ignored (%.2fs out of range %.0f–%.0fs)|r",
@@ -928,7 +936,7 @@ end
 
 local optionsPanel = nil
 
-local function BuildOptionsPanel()
+BuildOptionsPanel = function()
     if optionsPanel then return optionsPanel end
 
     local panel = CreateFrame("Frame", "AldorTaxOptionsPanel", UIParent)
