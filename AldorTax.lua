@@ -440,7 +440,8 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     elseif event == "CHAT_MSG_SAY" then
         local msg    = arg1 or ""
         local sender = arg2 or ""
-        if settings.autoThank and sender ~= UnitName("player") and msg:find("^AldorTax: Lift going down in:") then
+        local me = UnitName("player")
+        if settings.autoThank and sender ~= me and not sender:find("^" .. me .. "%-") and msg:find("^AldorTax: Lift going down in:") then
             DoEmote("THANK", sender)
         end
 
