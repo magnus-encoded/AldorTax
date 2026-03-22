@@ -10,26 +10,13 @@ warnText:SetScale(2)
 
 -- ─── Config ───────────────────────────────────────────────────────────────────
 
-local FALL_TIME             = 6.5    -- lift falling: top → bottom (visual/calibration)
-local RISE_TIME             = 7.5    -- lift rising:  bottom → top (visual/calibration)
+local FALL_TIME             = 6.5    -- lift falling: top → bottom
+local RISE_TIME             = 7.5    -- lift rising:  bottom → top
 local WAIT_AT_TOP           = 6.0
 local WAIT_AT_BOTTOM        = 5.0
 local CYCLE_TIME            = 25.0   -- fixed: the actual server cycle is 25s
 local APPROACH_WARNING_TIME = 10.0
-
--- Updates a segment duration for visual display. CYCLE_TIME stays fixed at 25s.
-local function ApplySegmentCalibration(varName, newVal, oldVal, dbKey)
-    if varName == "FALL_TIME"          then FALL_TIME      = newVal
-    elseif varName == "RISE_TIME"      then RISE_TIME      = newVal
-    elseif varName == "WAIT_AT_BOTTOM" then WAIT_AT_BOTTOM = newVal
-    elseif varName == "WAIT_AT_TOP"    then WAIT_AT_TOP    = newVal
-    end
-    if AldorTaxDB and dbKey then AldorTaxDB[dbKey] = newVal end
-    return true
-end
--- Per-segment plausible duration bounds (0=FALL, 1=BOTTOM, 2=RISE, 3=TOP)
-local segMin = { [0]=3, [1]=2, [2]=3, [3]=2 }
-local segMax = { [0]=15, [1]=12, [2]=15, [3]=12 }
+local CLICK_REACTION_TIME   = 0.2    -- human reaction time offset subtracted from sync clicks
 
 local ADDON_PREFIX          = "ALDORTAX"
 local MSG_VERSION           = 3
@@ -362,22 +349,6 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     if event == "ADDON_LOADED" and arg1 == "AldorTax" then
         if not AldorTaxDB then AldorTaxDB = {} end
         if not AldorTaxDB.blocklist then AldorTaxDB.blocklist = {} end
-        -- Restore saved segment durations (visual only, CYCLE_TIME stays 25)
-        if AldorTaxDB.fallTime and AldorTaxDB.riseTime then
-            local fall   = AldorTaxDB.fallTime
-            local rise   = AldorTaxDB.riseTime
-            local bottom = AldorTaxDB.bottomTime or WAIT_AT_BOTTOM
-            local top    = AldorTaxDB.topTime or WAIT_AT_TOP
-            if fall >= segMin[0] and fall <= segMax[0]
-               and rise >= segMin[2] and rise <= segMax[2]
-               and bottom >= segMin[1] and bottom <= segMax[1]
-               and top >= segMin[3] and top <= segMax[3] then
-                FALL_TIME      = fall
-                RISE_TIME      = rise
-                WAIT_AT_BOTTOM = bottom
-                WAIT_AT_TOP    = top
-            end
-        end
         -- Load saved settings, falling back to defaults
         if AldorTaxDB.settings then
             for k, v in pairs(AldorTaxDB.settings) do
@@ -520,7 +491,7 @@ function BuildSyncUI()
 
     local title = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     title:SetPoint("TOPLEFT", PAD, -8)
-    title:SetText("Aldor Lift  |cff888888click segment when it starts|r")
+    title:SetText("Aldor Lift  |cff888888click phase to sync|r")
     title:SetTextColor(1, 0.82, 0)
 
     local sourceLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -542,13 +513,6 @@ function BuildSyncUI()
         { t = WAIT_AT_TOP,    r = 0.1, g = 0.75, b = 0.2,  name = "TOP"    },
     }
 
-    -- Calibration state: records the last clicked segment and when it was clicked.
-    -- Any segment click sets a new reference; calibration fires when the clicked
-    -- segment immediately follows the previous one. Non-consecutive clicks and
-    -- same-segment re-clicks just update the reference without calibrating.
-    local lastPhaseClickT = nil
-    local lastPhaseIdx    = nil
-
     local xOff = 0
     for i, s in ipairs(segs) do
         local w         = (s.t / CYCLE_TIME) * BAR_W
@@ -565,51 +529,22 @@ function BuildSyncUI()
         segBtn:SetHighlightTexture("Interface/Buttons/ButtonHilight-Square", "ADD")
 
         segBtn:SetScript("OnClick", function()
-            local now = GetTime()
+            -- Clicking a segment means "this phase just started".
+            -- Subtract reaction time: the actual transition happened ~0.2s before
+            -- the user clicked, so we back-date the reference accordingly.
+            local now = GetTime() - CLICK_REACTION_TIME
 
-            -- Calibrate if this segment immediately follows the last clicked one.
-            -- Same-segment re-click (phaseIdx == lastPhaseIdx) just resets the
-            -- reference time without calibrating, allowing correction of early clicks.
-            if lastPhaseIdx ~= nil and lastPhaseClickT ~= nil
-               and phaseIdx == (lastPhaseIdx + 1) % 4 then
-                local measured = now - lastPhaseClickT
-                local mn, mx = segMin[lastPhaseIdx], segMax[lastPhaseIdx]
-                if measured >= mn and measured <= mx then
-                    if lastPhaseIdx == 0 then
-                        ApplySegmentCalibration("FALL_TIME", measured, FALL_TIME, "fallTime")
-                        Log(string.format("|cff00ff00AldorTax: FALL=%.2fs|r", FALL_TIME))
-                    elseif lastPhaseIdx == 1 then
-                        ApplySegmentCalibration("WAIT_AT_BOTTOM", measured, WAIT_AT_BOTTOM, "bottomTime")
-                        Log(string.format("|cff00ff00AldorTax: BOTTOM=%.2fs|r", WAIT_AT_BOTTOM))
-                    elseif lastPhaseIdx == 2 then
-                        ApplySegmentCalibration("RISE_TIME", measured, RISE_TIME, "riseTime")
-                        Log(string.format("|cff00ff00AldorTax: RISE=%.2fs|r", RISE_TIME))
-                    elseif lastPhaseIdx == 3 then
-                        ApplySegmentCalibration("WAIT_AT_TOP", measured, WAIT_AT_TOP, "topTime")
-                        Log(string.format("|cff00ff00AldorTax: TOP=%.2fs|r", WAIT_AT_TOP))
-                    end
-                else
-                    Log(string.format("|cffffff00AldorTax: %s ignored (%.2fs out of range %.0f–%.0fs)|r",
-                        segs[lastPhaseIdx+1].name, measured, mn, mx))
-                end
-            end
-
-            -- Back-calculate lastSync: this phase started right now
             local phaseStart = ({ [0]=0, [1]=FALL_TIME, [2]=FALL_TIME+WAIT_AT_BOTTOM, [3]=FALL_TIME+WAIT_AT_BOTTOM+RISE_TIME })[phaseIdx]
             lastSync = now - phaseStart
-            local rt = GetRealTime() - phaseStart
-            -- Write to DB directly — skip SaveSync's cycle refinement, which is only
-            -- valid for consecutive top-departure syncs, not arbitrary phase clicks.
+            local rt = GetRealTime() - CLICK_REACTION_TIME - phaseStart
             if AldorTaxDB then
                 AldorTaxDB.lastSyncRealTime = rt
-                lastSyncSource = nil   -- local sync; no remote source
+                lastSyncSource = nil
                 AldorTaxDB.lastSyncSource = nil
             end
             BroadcastSync(rt)
 
-            lastPhaseClickT = now
-            lastPhaseIdx    = phaseIdx
-            print(string.format("|cff00ff00AldorTax: %s started.|r", phaseName))
+            print(string.format("|cff00ff00AldorTax: Synced at %s (−%.0fms reaction)|r", phaseName, CLICK_REACTION_TIME * 1000))
         end)
 
         xOff = xOff + w
