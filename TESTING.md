@@ -4,13 +4,13 @@ Manual in-game verification for each feature. Mark items `[x]` as you test.
 
 ## Options Panel
 
-- [ ] Panel appears under Interface > AddOns > AldorTax on login
-- [ ] `/atax config` opens the options panel directly
-- [ ] "Party / Raid" checkbox toggles `syncParty` setting
-- [ ] "AldorTaxSync channel" checkbox toggles `syncChannel` setting
-- [ ] "Guild" checkbox toggles `syncGuild` setting
-- [ ] "Announce departure in /say" checkbox toggles `sayCountdown` setting
-- [ ] Checkbox states persist across `/reload`
+- [ ] Panel appears under Interface > AddOns > AldorTax on login NO
+- [ ] `/atax config` opens the options panel directly YES
+- [ ] "Party / Raid" checkbox toggles `syncParty` setting INCONCLUSIVE no verification in chat window
+- [ ] "AldorTaxSync channel" checkbox toggles `syncChannel` setting  same as above
+- [ ] "Guild" checkbox toggles `syncGuild` setting will not test to avoid spamming guild
+- [ ] "Announce departure in /say" checkbox toggles `sayCountdown` setting Causes error Interface failed because of an addon
+- [ ] Checkbox states persist across `/reload`  NO
 - [ ] Checkbox states persist across full logout/login
 
 ## Sync UI
@@ -43,7 +43,7 @@ Manual in-game verification for each feature. Mark items `[x]` as you test.
 ## Say Countdown
 
 - [ ] With `sayCountdown` enabled and on Aldor Rise / Terrace of Light:
-  - [ ] "AldorTax: leaving in 2" fires in /say at ~2s before departure
+  - [ ] "AldorTax: leaving in 2" fires in /say at ~2s before departure yes, but doesn't say anything. the event fires
   - [ ] "AldorTax: leaving in 1" fires in /say at ~1s before departure
   - [ ] "AldorTax: falling" fires in /say when the fall phase begins
 - [ ] Each message fires only once per departure cycle (no duplicates)
@@ -77,7 +77,7 @@ Manual in-game verification for each feature. Mark items `[x]` as you test.
 
 ## Layer Detection
 
-- [ ] Targeting an NPC in Shattrath detects layer from creature GUID zoneID field
+- [ ] Targeting an NPC in Shattrath detects layer from creature GUID zoneID field YES
 - [ ] Layer ID is logged when first detected or when it changes
 - [ ] Cross-layer sync from a player on a different layer logs timing divergence
 - [ ] Cross-layer sync with matching timings logs "timings match" message
@@ -112,6 +112,30 @@ Manual in-game verification for each feature. Mark items `[x]` as you test.
 - [ ] `/atax testmsg` sends and receives a test whisper to self
 - [ ] Messages with unknown/future version numbers are ignored with a log entry
 - [ ] v2 message format: `S|ver|phase|name|realm|fall|bottom|rise|top|layerID`
+
+## Recent Fix Verification
+
+### Options panel registration (agent 2 fix)
+- [ ] Panel appears in Interface > AddOns immediately on fresh login (no `/atax config` needed)
+- [ ] Panel appears in Interface > AddOns immediately after `/reload`
+- [ ] `/atax config` opens the panel on the FIRST try (not second)
+- [ ] Clicking checkboxes does NOT produce "interface action failed because of addon" error
+- [ ] Checkbox visual state updates immediately on click
+- [ ] Settings changed via checkbox take effect without reload
+
+### Auto-broadcast drift (agent 1 fix)
+- [ ] Calibrate locally, wait 2+ minutes, check `/atax log` — timer should not drift
+- [ ] After auto-broadcast fires (45s interval), cursor position should stay consistent
+- [ ] If a second player receives auto-broadcast, their cursor aligns with sender's cursor
+- [ ] `/atax sync` followed by waiting — cursor should stay aligned with actual lift cycle
+
+### Say countdown (ongoing)
+- [ ] With sayCountdown enabled, stand on Terrace of Light with valid sync
+- [ ] "AldorTax: leaving in 2" appears as /say chat (with player name, not just printed text)
+- [ ] "AldorTax: leaving in 1" appears as /say chat
+- [ ] "AldorTax: falling" appears as /say chat
+- [ ] No "interface action failed" error when say fires
+- [ ] Say messages do NOT fire when sayCountdown is disabled
 
 ## Persistence
 
