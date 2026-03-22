@@ -11,5 +11,6 @@ npc
 *.lua.bak
 log.txt
 
-# Claude Code local config
+# Dev-only files
 .claude/
+TESTING.md
