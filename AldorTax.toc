@@ -1,7 +1,7 @@
 ## Interface: 20504
 ## Title: Aldor Tax
 ## Notes: Tracks the Aldor Rise elevator cycle. Warns when the lift is about to leave. Click segments to calibrate timing. Syncs with nearby players automatically.
-## Version: 0.1.0-alpha
+## Version: 0.1.0
 ## Author: Fizziness
 ## SavedVariables: AldorTaxDB
 AldorTax.lua
