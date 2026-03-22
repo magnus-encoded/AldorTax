@@ -11,8 +11,8 @@ warnText:SetScale(2)
 -- ─── Config ───────────────────────────────────────────────────────────────────
 
 local FALL_TIME             = 6.5    -- lift falling: top → bottom (visual/calibration)
-local RISE_TIME             = 8.5    -- lift rising:  bottom → top (visual/calibration)
-local WAIT_AT_TOP           = 5.0
+local RISE_TIME             = 7.5    -- lift rising:  bottom → top (visual/calibration)
+local WAIT_AT_TOP           = 6.0
 local WAIT_AT_BOTTOM        = 5.0
 local CYCLE_TIME            = 25.0   -- fixed: the actual server cycle is 25s
 local APPROACH_WARNING_TIME = 10.0
@@ -51,15 +51,7 @@ local settings = {
     syncParty    = true,   -- broadcast sync via party / raid
     syncChannel  = true,   -- broadcast sync via AldorTaxSync custom channel
     syncGuild    = false,  -- broadcast sync via guild
-    sayCountdown = false,  -- /say countdown on Aldor Rise before the lift falls
 }
-
--- /say countdown tracking: which thresholds already announced this departure cycle
-local sayDone    = {}
-local sayCycleN  = -1
-
--- Resolve SendChatMessage: modern clients move it to C_ChatInfo, Classic keeps the global
-local SafeSendChatMessage = (C_ChatInfo and C_ChatInfo.SendChatMessage) or SendChatMessage
 
 -- Forward-declare so the ADDON_LOADED closure (created before the definition) can see it
 local BuildOptionsPanel
@@ -370,17 +362,20 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     if event == "ADDON_LOADED" and arg1 == "AldorTax" then
         if not AldorTaxDB then AldorTaxDB = {} end
         if not AldorTaxDB.blocklist then AldorTaxDB.blocklist = {} end
-        -- Restore saved segment durations (visual only, CYCLE_TIME stays 25, TOP stays 5)
+        -- Restore saved segment durations (visual only, CYCLE_TIME stays 25)
         if AldorTaxDB.fallTime and AldorTaxDB.riseTime then
             local fall   = AldorTaxDB.fallTime
             local rise   = AldorTaxDB.riseTime
             local bottom = AldorTaxDB.bottomTime or WAIT_AT_BOTTOM
+            local top    = AldorTaxDB.topTime or WAIT_AT_TOP
             if fall >= segMin[0] and fall <= segMax[0]
                and rise >= segMin[2] and rise <= segMax[2]
-               and bottom >= segMin[1] and bottom <= segMax[1] then
+               and bottom >= segMin[1] and bottom <= segMax[1]
+               and top >= segMin[3] and top <= segMax[3] then
                 FALL_TIME      = fall
                 RISE_TIME      = rise
                 WAIT_AT_BOTTOM = bottom
+                WAIT_AT_TOP    = top
             end
         end
         -- Load saved settings, falling back to defaults
@@ -457,35 +452,11 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         end
     end
 
-    -- /say countdown near the lift (deferred via C_Timer to avoid tainted OnUpdate context)
-    if settings.sayCountdown and progress then
-        if status == "on_platform" then
-            local cycleN = math.floor((GetTime() - lastSync) / CYCLE_TIME)
-            if cycleN ~= sayCycleN then sayCycleN = cycleN; sayDone = {} end
-
-            if timeUntilNextDrop <= 2 and timeUntilNextDrop > 1 and not sayDone[2] then
-                sayDone[2] = true
-                C_Timer.After(0, function()
-                    local ok, err = pcall(SafeSendChatMessage, "AldorTax: leaving in 2", "SAY")
-                    if not ok then Log("|cffff6600AldorTax: /say failed: " .. tostring(err) .. "|r") end
-                end)
-            end
-            if timeUntilNextDrop <= 1 and timeUntilNextDrop > 0 and not sayDone[1] then
-                sayDone[1] = true
-                C_Timer.After(0, function()
-                    local ok, err = pcall(SafeSendChatMessage, "AldorTax: leaving in 1", "SAY")
-                    if not ok then Log("|cffff6600AldorTax: /say failed: " .. tostring(err) .. "|r") end
-                end)
-            end
-            if progress < 1 and not sayDone["fall"] then
-                sayDone["fall"] = true
-                C_Timer.After(0, function()
-                    local ok, err = pcall(SafeSendChatMessage, "AldorTax: falling", "SAY")
-                    if not ok then Log("|cffff6600AldorTax: /say failed: " .. tostring(err) .. "|r") end
-                end)
-            end
-        end
-    end
+    -- /say countdown was removed: Blizzard blocks SendChatMessage("SAY") outdoors
+    -- since patch 8.2.5 (confirmed in DBM source). Shattrath is outdoor, so there
+    -- is no way for addons to send /say messages near the lift. The feature's purpose
+    -- was to warn nearby players without the addon and advertise its existence —
+    -- self-only notifications don't serve either goal.
 
     -- Re-anchor lastSync from the persisted real-time reference every cycle to
     -- prevent floating-point drift between GetTime() and the modulo'd CYCLE_TIME.
@@ -614,8 +585,8 @@ function BuildSyncUI()
                         ApplySegmentCalibration("RISE_TIME", measured, RISE_TIME, "riseTime")
                         Log(string.format("|cff00ff00AldorTax: RISE=%.2fs|r", RISE_TIME))
                     elseif lastPhaseIdx == 3 then
-                        -- TOP is fixed at 5s; log the measured value for reference only
-                        Log(string.format("|cff888888AldorTax: TOP measured %.2fs (fixed at %.1fs)|r", measured, WAIT_AT_TOP))
+                        ApplySegmentCalibration("WAIT_AT_TOP", measured, WAIT_AT_TOP, "topTime")
+                        Log(string.format("|cff00ff00AldorTax: TOP=%.2fs|r", WAIT_AT_TOP))
                     end
                 else
                     Log(string.format("|cffffff00AldorTax: %s ignored (%.2fs out of range %.0f–%.0fs)|r",
@@ -720,114 +691,6 @@ function BuildSyncUI()
 end
 
 -- ─── Debug panel ─────────────────────────────────────────────────────────────
-
-local function RunTests()
-    local out = {}
-    local function p(s) table.insert(out, s) end
-
-    p("=== Player state ===")
-    local px, py = UnitPosition("player")
-    p(string.format("  Zone: %s | Sub: %s", GetZoneText(), GetSubZoneText()))
-    p(string.format("  X=%.2f  Y=%.2f", px or 0, py or 0))
-
-    p("=== Calibration ===")
-    local src = (AldorTaxDB and AldorTaxDB.fallTime) and "(measured)" or "(default)"
-    p(string.format("  FALL=%.3fs  BOTTOM=%.3fs  RISE=%.3fs  TOP=%.3fs  %s",
-        FALL_TIME, WAIT_AT_BOTTOM, RISE_TIME, WAIT_AT_TOP, src))
-    p(string.format("  CYCLE_TIME = %.3fs (fixed)", CYCLE_TIME))
-
-    p("=== Sync state ===")
-    if lastSync > 0 then
-        local progress = (GetTime() - lastSync) % CYCLE_TIME
-        p(string.format("  lastSync = %.1fs ago  |  next drop in %.1fs", GetTime() - lastSync, CYCLE_TIME - progress))
-        p(string.format("  source = %s", lastSyncSource and (lastSyncSource.name .. "-" .. lastSyncSource.realm) or "local"))
-    else
-        p("  lastSync = 0 (not synced)")
-    end
-
-    p("=== Comm ===")
-    p(string.format("  syncChanNum = %d  (%s)", syncChanNum, syncChanNum > 0 and "connected" or "not connected"))
-    p(string.format("  realTimeOffset = %s", realTimeOffset and string.format("%.4f", realTimeOffset) or "not calibrated"))
-    p(string.format("  prefixRegistered = %s", tostring(prefixRegistered)))
-
-    p("=== Settings ===")
-    p(string.format("  syncParty=%s  syncChannel=%s  syncGuild=%s  sayCountdown=%s",
-        tostring(settings.syncParty), tostring(settings.syncChannel),
-        tostring(settings.syncGuild), tostring(settings.sayCountdown)))
-
-    p("=== Blocklist ===")
-    if AldorTaxDB and AldorTaxDB.blocklist then
-        local any = false
-        for k, v in pairs(AldorTaxDB.blocklist) do
-            p(string.format("  %s: %d deaths", k, v))
-            any = true
-        end
-        if not any then p("  (empty)") end
-    end
-
-    return table.concat(out, "\n")
-end
-
-local debugPanel
-
-local function BuildDebugPanel()
-    local p = CreateFrame("Frame", "AldorTaxDebugPanel", UIParent, "BackdropTemplate")
-    p:SetSize(440, 300)
-    p:SetPoint("CENTER")
-    p:SetFrameStrata("DIALOG")
-    p:SetMovable(true)
-    p:EnableMouse(true)
-    p:RegisterForDrag("LeftButton")
-    p:SetScript("OnDragStart", p.StartMoving)
-    p:SetScript("OnDragStop",  p.StopMovingOrSizing)
-    p:SetBackdrop({
-        bgFile   = "Interface/DialogFrame/UI-DialogBox-Background",
-        edgeFile = "Interface/DialogFrame/UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 11, right = 12, top = 12, bottom = 11 },
-    })
-
-    local title = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", 0, -16)
-    title:SetText("AldorTax — Debug")
-
-    local closeBtn = CreateFrame("Button", nil, p, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -5, -5)
-    closeBtn:SetScript("OnClick", function() p:Hide() end)
-
-    local refreshBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    refreshBtn:SetSize(100, 26)
-    refreshBtn:SetText("Refresh")
-    refreshBtn:SetPoint("TOPLEFT", 16, -38)
-
-    local ebFrame = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    ebFrame:SetPoint("TOPLEFT", 16, -74)
-    ebFrame:SetPoint("BOTTOMRIGHT", -16, 16)
-    ebFrame:SetBackdrop({
-        bgFile = "Interface/ChatFrame/ChatFrameBackground",
-        tile = true, tileSize = 5, edgeSize = 0,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    ebFrame:SetBackdropColor(0, 0, 0, 0.9)
-
-    local eb = CreateFrame("EditBox", nil, ebFrame)
-    eb:SetPoint("TOPLEFT", 4, -4)
-    eb:SetPoint("BOTTOMRIGHT", -4, 4)
-    eb:SetMultiLine(true)
-    eb:SetFontObject("ChatFontNormal")
-    eb:SetAutoFocus(false)
-    eb:EnableMouse(true)
-    eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-
-    local function Refresh()
-        eb:SetText(RunTests())
-        eb:SetCursorPosition(0)
-        eb:HighlightText()
-    end
-    refreshBtn:SetScript("OnClick", Refresh)
-    p:SetScript("OnShow", Refresh)
-    return p
-end
 
 -- ─── Log panel ───────────────────────────────────────────────────────────────
 
@@ -963,22 +826,8 @@ BuildOptionsPanel = function()
     local cbGuild   = MakeCheckbox(panel, cbChannel, nil, "syncGuild",
         "Guild",          "Broadcast calibration syncs to your guild.")
 
-    -- Say countdown section
-    local sayHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    sayHdr:SetPoint("TOPLEFT", cbGuild, "BOTTOMLEFT", 0, -20)
-    sayHdr:SetText("/say countdown")
-
-    local cbSay = MakeCheckbox(panel, sayHdr, -4, "sayCountdown",
-        'Announce departure in /say',
-        'Says "AldorTax: leaving in 2 / 1 / falling" on Aldor Rise so nearby players are warned.')
-
-    local sayNote = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    sayNote:SetPoint("TOPLEFT", cbSay, "BOTTOMLEFT", 24, -2)
-    sayNote:SetText('"AldorTax: leaving in 2"  →  "leaving in 1"  →  "falling"')
-    sayNote:SetTextColor(0.6, 0.6, 0.6)
-
     panel:SetScript("OnShow", function()
-        cbParty:Refresh(); cbChannel:Refresh(); cbGuild:Refresh(); cbSay:Refresh()
+        cbParty:Refresh(); cbChannel:Refresh(); cbGuild:Refresh()
     end)
 
     -- Register with Settings API
@@ -1028,17 +877,6 @@ SlashCmdList["ALDORTAX"] = function(msg)
         if syncUI then
             if syncUI:IsShown() then syncUI:Hide() else syncUI:Show() end
         end
-    elseif msg == "debug" then
-        local ok, err = pcall(function()
-            if not debugPanel then debugPanel = BuildDebugPanel() end
-            if debugPanel:IsShown() then debugPanel:Hide() else debugPanel:Show() end
-        end)
-        if not ok then
-            print("|cffff0000[AldorTax] Panel error: " .. tostring(err) .. "|r")
-            for line in RunTests():gmatch("[^\n]+") do
-                print("|cffffff00[AldorTax]|r " .. line)
-            end
-        end
     elseif msg == "config" then
         if not optionsPanel then BuildOptionsPanel() end
         if optionsPanel and optionsPanel._settingsCategory then
@@ -1057,7 +895,6 @@ SlashCmdList["ALDORTAX"] = function(msg)
         print("  /atax ui            — toggle sync panel")
         print("  /atax config        — open settings panel")
         print("  /atax log           — toggle copyable log panel")
-        print("  /atax debug         — toggle debug panel")
         print("  /atax testmsg       — whisper yourself to test addon messaging")
         print("  /atax unblock Name-Realm  — remove from blocklist")
     end
