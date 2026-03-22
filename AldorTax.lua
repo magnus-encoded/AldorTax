@@ -10,45 +10,21 @@ warnText:SetScale(2)
 
 -- ─── Config ───────────────────────────────────────────────────────────────────
 
-local FALL_TIME             = 7.25   -- lift falling: top → bottom (calibrated independently)
-local RISE_TIME             = 7.25   -- lift rising:  bottom → top (calibrated independently)
-local WAIT_AT_TOP           = 5.0
+local FALL_TIME             = 6.5    -- lift falling: top → bottom (visual/calibration)
+local RISE_TIME             = 7.5    -- lift rising:  bottom → top (visual/calibration)
+local WAIT_AT_TOP           = 6.0
 local WAIT_AT_BOTTOM        = 5.0
-local CYCLE_TIME            = 24.5   -- derived: FALL+WAIT_AT_BOTTOM+RISE+WAIT_AT_TOP
+local CYCLE_TIME            = 25.0   -- fixed: the actual server cycle is 25s
 local APPROACH_WARNING_TIME = 10.0
-local CYCLE_TIME_MIN        = 22.5
-local CYCLE_TIME_MAX        = 26.5
 
-local function UpdateCycleTime()
-    CYCLE_TIME = FALL_TIME + WAIT_AT_BOTTOM + RISE_TIME + WAIT_AT_TOP
-end
-
--- Returns true and updates DB if the new cycle total is plausible.
--- Reverts the changed variable and returns false otherwise.
+-- Updates a segment duration for visual display. CYCLE_TIME stays fixed at 25s.
 local function ApplySegmentCalibration(varName, newVal, oldVal, dbKey)
-    local oldCycle = CYCLE_TIME
-    if varName == "FALL_TIME"      then FALL_TIME      = newVal
-    elseif varName == "RISE_TIME"  then RISE_TIME      = newVal
+    if varName == "FALL_TIME"          then FALL_TIME      = newVal
+    elseif varName == "RISE_TIME"      then RISE_TIME      = newVal
     elseif varName == "WAIT_AT_BOTTOM" then WAIT_AT_BOTTOM = newVal
     elseif varName == "WAIT_AT_TOP"    then WAIT_AT_TOP    = newVal
     end
-    UpdateCycleTime()
-    if CYCLE_TIME < CYCLE_TIME_MIN or CYCLE_TIME > CYCLE_TIME_MAX then
-        Log(string.format("|cffff4400AldorTax: %s=%.2fs rejected — cycle would be %.2fs (allowed %.1f–%.1fs)|r",
-            varName, newVal, CYCLE_TIME, CYCLE_TIME_MIN, CYCLE_TIME_MAX))
-        -- Revert
-        if varName == "FALL_TIME"          then FALL_TIME      = oldVal
-        elseif varName == "RISE_TIME"      then RISE_TIME      = oldVal
-        elseif varName == "WAIT_AT_BOTTOM" then WAIT_AT_BOTTOM = oldVal
-        elseif varName == "WAIT_AT_TOP"    then WAIT_AT_TOP    = oldVal
-        end
-        CYCLE_TIME = oldCycle
-        return false
-    end
-    if AldorTaxDB then
-        if dbKey then AldorTaxDB[dbKey] = newVal end
-        AldorTaxDB.cycleTime = CYCLE_TIME
-    end
+    if AldorTaxDB and dbKey then AldorTaxDB[dbKey] = newVal end
     return true
 end
 -- Per-segment plausible duration bounds (0=FALL, 1=BOTTOM, 2=RISE, 3=TOP)
@@ -56,7 +32,7 @@ local segMin = { [0]=3, [1]=2, [2]=3, [3]=2 }
 local segMax = { [0]=15, [1]=12, [2]=15, [3]=12 }
 
 local ADDON_PREFIX          = "ALDORTAX"
-local MSG_VERSION           = 2
+local MSG_VERSION           = 3
 local SYNC_CHANNEL          = "AldorTaxSync"
 local SOFT_BLOCK_THRESHOLD  = 3     -- death reports to stop auto-applying someone's syncs
 local HARD_BLOCK_THRESHOLD  = 6     -- death reports to permanently ignore
@@ -69,7 +45,6 @@ local realTimeOffset   = nil
 local syncChanNum      = 0
 local lastAutoBroadcast = 0
 local AUTO_BROADCAST_INTERVAL = 45
-local currentLayerID   = nil   -- zoneID field from a creature GUID; unique per layer/shard
 
 -- User settings (persisted in AldorTaxDB.settings)
 local settings = {
@@ -129,28 +104,6 @@ end
 local function SaveSync(sourceName, sourceRealm, realTime)
     if not AldorTaxDB then return end
     local realNow = realTime or GetRealTime()
-
-    -- Refine CYCLE_TIME from the interval between consecutive departure syncs
-    if AldorTaxDB.lastSyncRealTime and realTimeOffset then
-        local interval = realNow - AldorTaxDB.lastSyncRealTime
-        local nCycles  = math.floor(interval / CYCLE_TIME + 0.5)
-        if nCycles >= 1 and nCycles <= 20 then
-            local measured = interval / nCycles
-            if measured > CYCLE_TIME_MIN and measured < CYCLE_TIME_MAX then
-                -- Preserve the known FALL/RISE asymmetry, just scale both proportionally
-                local oldCycle = CYCLE_TIME
-                local scale = measured / oldCycle
-                FALL_TIME = FALL_TIME * scale
-                RISE_TIME = RISE_TIME * scale
-                UpdateCycleTime()
-                AldorTaxDB.cycleTime  = CYCLE_TIME
-                AldorTaxDB.fallTime   = FALL_TIME
-                AldorTaxDB.riseTime   = RISE_TIME
-                Log(string.format("|cff00ff00AldorTax: cycle refined to %.3fs|r", CYCLE_TIME))
-            end
-        end
-    end
-
     AldorTaxDB.lastSyncRealTime = realNow
     lastSyncSource = sourceName and { name = sourceName, realm = sourceRealm or "" } or nil
     AldorTaxDB.lastSyncSource  = lastSyncSource
@@ -293,11 +246,17 @@ end
 local function BroadcastSync(realTime)
     local name  = UnitName("player") or "Unknown"
     local realm = GetRealmName() or ""
-    local rt    = realTime or GetRealTime()
+    -- realTime is the cycle-start real time when provided by a segment click.
+    -- When auto-broadcasting (no arg), use the stored cycle-start real time so
+    -- the phase encodes the same epoch-offset the receiver needs to reconstruct
+    -- our cycle alignment.  Falling back to GetRealTime() (≡ "cycle starts now")
+    -- only when there is no stored reference.
+    local rt    = realTime
+                  or (AldorTaxDB and AldorTaxDB.lastSyncRealTime)
+                  or GetRealTime()
     local phase = rt % CYCLE_TIME
-    local layer = currentLayerID or 0
-    SendMsg(string.format("S|%d|%.3f|%s|%s|%.3f|%.3f|%.3f|%.3f|%d",
-        MSG_VERSION, phase, name, realm, FALL_TIME, WAIT_AT_BOTTOM, RISE_TIME, WAIT_AT_TOP, layer))
+    SendMsg(string.format("S|%d|%.3f|%s|%s|%.3f|%.3f|%.3f|%.3f",
+        MSG_VERSION, phase, name, realm, FALL_TIME, WAIT_AT_BOTTOM, RISE_TIME, WAIT_AT_TOP))
 end
 
 local function BroadcastDied()
@@ -352,44 +311,14 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
     end
 
     if msgType == "S" and #parts >= 4 then
-        -- v1: S|ver|phase|name|realm[|fall|bottom|rise|top]
-        -- v2: S|ver|phase|name|realm|fall|bottom|rise|top|layerID
+        -- v3: S|ver|phase|name|realm|fall|bottom|rise|top
         local phase        = tonumber(parts[2])
         local name, realm  = parts[3], parts[4]
         local fall         = tonumber(parts[5])
         local bottom       = tonumber(parts[6])
         local rise         = tonumber(parts[7])
         local top          = tonumber(parts[8])
-        local senderLayer  = tonumber(parts[9])
         if not phase then return end
-        -- If sender is on a different layer and we have user-calibrated local data,
-        -- log any timing divergence for research. Always apply the sync regardless.
-        local hasLocalCalibration = AldorTaxDB and AldorTaxDB.fallTime and AldorTaxDB.riseTime
-        local isDifferentLayer = currentLayerID and senderLayer and senderLayer ~= 0
-                                 and senderLayer ~= currentLayerID
-        if isDifferentLayer then
-            if hasLocalCalibration and fall and rise then
-                local dFall   = math.abs(fall   - FALL_TIME)
-                local dBottom = math.abs((bottom or WAIT_AT_BOTTOM) - WAIT_AT_BOTTOM)
-                local dRise   = math.abs(rise   - RISE_TIME)
-                local dTop    = math.abs((top    or WAIT_AT_TOP)    - WAIT_AT_TOP)
-                local dCycle  = dFall + dBottom + dRise + dTop
-                if dCycle > 0.1 then
-                    Log(string.format(
-                        "|cffffff00AldorTax: Cross-layer sync from %s (layer %d vs %d) — timing differs by %.2fs " ..
-                        "(fall Δ%.2f bottom Δ%.2f rise Δ%.2f top Δ%.2f)|r",
-                        name, senderLayer, currentLayerID, dCycle, dFall, dBottom, dRise, dTop))
-                else
-                    Log(string.format(
-                        "|cff888888AldorTax: Cross-layer sync from %s (layer %d vs %d) — timings match within %.2fs|r",
-                        name, senderLayer, currentLayerID, dCycle))
-                end
-            else
-                Log(string.format(
-                    "|cff888888AldorTax: Cross-layer sync from %s (layer %d vs %d) — no local calibration to compare|r",
-                    name, senderLayer, currentLayerID))
-            end
-        end
         if IsHardBlocked(name, realm) then return end
         if IsSoftBlocked(name, realm) then
             print(string.format("|cffff6600AldorTax: Ignored sync from soft-blocked %s-%s|r", name, realm))
@@ -429,44 +358,27 @@ logicFrame:RegisterEvent("CHAT_MSG_ADDON")
 logicFrame:RegisterEvent("ZONE_CHANGED")
 logicFrame:RegisterEvent("ZONE_CHANGED_INDOORS")
 logicFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-logicFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 logicFrame:RegisterEvent("PLAYER_DEAD")
 
 logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     if event == "ADDON_LOADED" and arg1 == "AldorTax" then
         if not AldorTaxDB then AldorTaxDB = {} end
         if not AldorTaxDB.blocklist then AldorTaxDB.blocklist = {} end
+        -- Restore saved segment durations (visual only, CYCLE_TIME stays 25)
         if AldorTaxDB.fallTime and AldorTaxDB.riseTime then
             local fall   = AldorTaxDB.fallTime
             local rise   = AldorTaxDB.riseTime
             local bottom = AldorTaxDB.bottomTime or WAIT_AT_BOTTOM
             local top    = AldorTaxDB.topTime    or WAIT_AT_TOP
-            local cycle  = fall + bottom + rise + top
             if fall >= segMin[0] and fall <= segMax[0]
                and rise >= segMin[2] and rise <= segMax[2]
                and bottom >= segMin[1] and bottom <= segMax[1]
-               and top >= segMin[3] and top <= segMax[3]
-               and cycle >= CYCLE_TIME_MIN and cycle <= CYCLE_TIME_MAX then
+               and top >= segMin[3] and top <= segMax[3] then
                 FALL_TIME      = fall
                 RISE_TIME      = rise
                 WAIT_AT_BOTTOM = bottom
                 WAIT_AT_TOP    = top
-                UpdateCycleTime()
-            else
-                Log(string.format("|cffffff00AldorTax: ignoring saved calibration — fall=%.2f rise=%.2f bottom=%.2f top=%.2f cycle=%.2f out of bounds|r",
-                    fall, rise, bottom, top, cycle))
-                AldorTaxDB.fallTime   = nil
-                AldorTaxDB.riseTime   = nil
-                AldorTaxDB.bottomTime = nil
-                AldorTaxDB.topTime    = nil
             end
-        elseif AldorTaxDB.cycleTime and
-               AldorTaxDB.cycleTime > CYCLE_TIME_MIN and
-               AldorTaxDB.cycleTime < CYCLE_TIME_MAX then
-            -- Legacy: split old symmetric cycle time evenly
-            FALL_TIME = (AldorTaxDB.cycleTime - WAIT_AT_TOP - WAIT_AT_BOTTOM) / 2
-            RISE_TIME = FALL_TIME
-            UpdateCycleTime()
         end
         -- Load saved settings, falling back to defaults
         if AldorTaxDB.settings then
@@ -474,10 +386,10 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 if settings[k] ~= nil then settings[k] = v end
             end
         end
-        BuildOptionsPanel()
         RegisterPrefix()
         JoinSyncChannel()
         RestoreSync()
+        BuildOptionsPanel()
 
     elseif event == "CHAT_MSG_ADDON" then
         HandleAddonMessage(arg1, arg2, arg3, arg4)
@@ -489,21 +401,6 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             lastSyncSource = nil
             warnFrame:Hide()
             Log("|cffff0000AldorTax: Death detected in Shattrath — sync cleared and reported.|r")
-        end
-
-    elseif event == "PLAYER_TARGET_CHANGED" then
-        if GetZoneText() == "Shattrath City" then
-            local guid = UnitGUID("target")
-            if guid then
-                local unitType, _, _, _, zoneID = strsplit("-", guid)
-                if unitType == "Creature" and zoneID and tonumber(zoneID) then
-                    local newID = tonumber(zoneID)
-                    if newID ~= currentLayerID then
-                        currentLayerID = newID
-                        Log(string.format("|cff888888AldorTax: layer detected (zoneID=%d)|r", currentLayerID))
-                    end
-                end
-            end
         end
 
     elseif event == "ZONE_CHANGED" or event == "ZONE_CHANGED_INDOORS" or event == "ZONE_CHANGED_NEW_AREA" then
@@ -525,7 +422,7 @@ end)
 logicFrame:SetScript("OnUpdate", function(self, elapsed)
     local subzone = GetSubZoneText()
     local status
-    if subzone == "Aldor Rise" then
+    if subzone == "Aldor Rise" or subzone == "Terrace of Light" then
         status = "on_platform"
     elseif GetZoneText() == "Shattrath City" then
         status = "approaching"
@@ -558,21 +455,27 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
     end
 
     -- /say countdown on Aldor Rise
-    if settings.sayCountdown and progress and status == "on_platform" then
-        local cycleN = math.floor((GetTime() - lastSync) / CYCLE_TIME)
-        if cycleN ~= sayCycleN then sayCycleN = cycleN; sayDone = {} end
+    if settings.sayCountdown and progress then
+        if status == "on_platform" then
+            local cycleN = math.floor((GetTime() - lastSync) / CYCLE_TIME)
+            if cycleN ~= sayCycleN then sayCycleN = cycleN; sayDone = {} end
 
-        if timeUntilNextDrop <= 2 and timeUntilNextDrop > 1 and not sayDone[2] then
-            sayDone[2] = true
-            SendChatMessage("AldorTax: leaving in 2", "SAY")
-        end
-        if timeUntilNextDrop <= 1 and timeUntilNextDrop > 0 and not sayDone[1] then
-            sayDone[1] = true
-            SendChatMessage("AldorTax: leaving in 1", "SAY")
-        end
-        if progress < 1 and not sayDone["fall"] then
-            sayDone["fall"] = true
-            SendChatMessage("AldorTax: falling", "SAY")
+            if timeUntilNextDrop <= 2 and timeUntilNextDrop > 1 and not sayDone[2] then
+                sayDone[2] = true
+                pcall(SendChatMessage, "AldorTax: leaving in 2", "SAY")
+            end
+            if timeUntilNextDrop <= 1 and timeUntilNextDrop > 0 and not sayDone[1] then
+                sayDone[1] = true
+                pcall(SendChatMessage, "AldorTax: leaving in 1", "SAY")
+            end
+            if progress < 1 and not sayDone["fall"] then
+                sayDone["fall"] = true
+                pcall(SendChatMessage, "AldorTax: falling", "SAY")
+            end
+        elseif not sayDone["_diag"] then
+            sayDone["_diag"] = true
+            Log(string.format("|cffffff00AldorTax: sayCountdown on but subzone=%q (need 'Aldor Rise')|r",
+                subzone or "nil"))
         end
     end
 
@@ -694,22 +597,17 @@ function BuildSyncUI()
                 local mn, mx = segMin[lastPhaseIdx], segMax[lastPhaseIdx]
                 if measured >= mn and measured <= mx then
                     if lastPhaseIdx == 0 then
-                        if ApplySegmentCalibration("FALL_TIME", measured, FALL_TIME, "fallTime") then
-                            Log(string.format("|cff00ff00AldorTax: FALL=%.2fs → cycle=%.3fs|r", FALL_TIME, CYCLE_TIME))
-                        end
+                        ApplySegmentCalibration("FALL_TIME", measured, FALL_TIME, "fallTime")
+                        Log(string.format("|cff00ff00AldorTax: FALL=%.2fs|r", FALL_TIME))
                     elseif lastPhaseIdx == 1 then
-                        if ApplySegmentCalibration("WAIT_AT_BOTTOM", measured, WAIT_AT_BOTTOM, "bottomTime") then
-                            Log(string.format("|cff00ff00AldorTax: BOTTOM=%.2fs → cycle=%.3fs|r", WAIT_AT_BOTTOM, CYCLE_TIME))
-                        end
+                        ApplySegmentCalibration("WAIT_AT_BOTTOM", measured, WAIT_AT_BOTTOM, "bottomTime")
+                        Log(string.format("|cff00ff00AldorTax: BOTTOM=%.2fs|r", WAIT_AT_BOTTOM))
                     elseif lastPhaseIdx == 2 then
-                        if ApplySegmentCalibration("RISE_TIME", measured, RISE_TIME, "riseTime") then
-                            Log(string.format("|cff00ff00AldorTax: RISE=%.2fs → cycle=%.3fs  (fall=%.2f rise=%.2f)|r",
-                                RISE_TIME, CYCLE_TIME, FALL_TIME, RISE_TIME))
-                        end
+                        ApplySegmentCalibration("RISE_TIME", measured, RISE_TIME, "riseTime")
+                        Log(string.format("|cff00ff00AldorTax: RISE=%.2fs|r", RISE_TIME))
                     elseif lastPhaseIdx == 3 then
-                        if ApplySegmentCalibration("WAIT_AT_TOP", measured, WAIT_AT_TOP, "topTime") then
-                            Log(string.format("|cff00ff00AldorTax: TOP=%.2fs → cycle=%.3fs|r", WAIT_AT_TOP, CYCLE_TIME))
-                        end
+                        ApplySegmentCalibration("WAIT_AT_TOP", measured, WAIT_AT_TOP, "topTime")
+                        Log(string.format("|cff00ff00AldorTax: TOP=%.2fs|r", WAIT_AT_TOP))
                     end
                 else
                     Log(string.format("|cffffff00AldorTax: %s ignored (%.2fs out of range %.0f–%.0fs)|r",
@@ -823,13 +721,12 @@ local function RunTests()
     local px, py = UnitPosition("player")
     p(string.format("  Zone: %s | Sub: %s", GetZoneText(), GetSubZoneText()))
     p(string.format("  X=%.2f  Y=%.2f", px or 0, py or 0))
-    p(string.format("  Layer: %s", currentLayerID and tostring(currentLayerID) or "unknown"))
 
     p("=== Calibration ===")
     local src = (AldorTaxDB and AldorTaxDB.fallTime) and "(measured)" or "(default)"
     p(string.format("  FALL=%.3fs  BOTTOM=%.3fs  RISE=%.3fs  TOP=%.3fs  %s",
         FALL_TIME, WAIT_AT_BOTTOM, RISE_TIME, WAIT_AT_TOP, src))
-    p(string.format("  CYCLE_TIME = %.3fs  (allowed %.1f–%.1fs)", CYCLE_TIME, CYCLE_TIME_MIN, CYCLE_TIME_MAX))
+    p(string.format("  CYCLE_TIME = %.3fs (fixed)", CYCLE_TIME))
 
     p("=== Sync state ===")
     if lastSync > 0 then
@@ -988,30 +885,44 @@ local function BuildLogPanel()
         eb:SetCursorPosition(0)
     end
 
+    p:Hide()  -- WoW frames start visible by default
     return p
 end
 
 -- ─── Interface Options panel ─────────────────────────────────────────────────
 
 local function SaveSettings()
-    if AldorTaxDB then AldorTaxDB.settings = settings end
+    if AldorTaxDB then
+        local copy = {}
+        for k, v in pairs(settings) do copy[k] = v end
+        AldorTaxDB.settings = copy
+    end
 end
 
 local function MakeCheckbox(parent, anchorTo, anchorOffset, key, label, tooltip)
-    local cb = CreateFrame("CheckButton", "AldorTaxOpt_" .. key, parent,
-                           "InterfaceOptionsCheckButtonTemplate")
+    local cb = CreateFrame("CheckButton", "AldorTaxOpt_" .. key, parent)
+    cb:SetSize(26, 26)
     if anchorTo then
         cb:SetPoint("TOPLEFT", anchorTo, "BOTTOMLEFT", 0, anchorOffset or -4)
     else
         cb:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, -48)
     end
-    cb.Text:SetText(label)
-    if tooltip then cb.tooltipText = tooltip end
+    cb:SetNormalTexture("Interface\\Buttons\\UI-CheckBox-Up")
+    cb:SetPushedTexture("Interface\\Buttons\\UI-CheckBox-Down")
+    cb:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight", "ADD")
+    cb:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    local text = cb:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+    text:SetText(label)
+    cb.label = text
+    cb:SetHitRectInsets(0, -text:GetStringWidth() - 4, 0, 0)
     cb:SetScript("OnClick", function(self)
-        settings[key] = self:GetChecked() and true or false
+        local val = self:GetChecked() and true or false
+        settings[key] = val
         SaveSettings()
     end)
     cb.Refresh = function() cb:SetChecked(settings[key]) end
+    cb.Refresh()
     return cb
 end
 
@@ -1020,7 +931,7 @@ local optionsPanel = nil
 local function BuildOptionsPanel()
     if optionsPanel then return optionsPanel end
 
-    local panel = CreateFrame("Frame", "AldorTaxOptionsPanel")
+    local panel = CreateFrame("Frame", "AldorTaxOptionsPanel", UIParent)
     panel.name = "AldorTax"
 
     local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
@@ -1062,7 +973,13 @@ local function BuildOptionsPanel()
         cbParty:Refresh(); cbChannel:Refresh(); cbGuild:Refresh(); cbSay:Refresh()
     end)
 
-    InterfaceOptions_AddCategory(panel)
+    -- Register with Settings API
+    if Settings and Settings.RegisterCanvasLayoutCategory then
+        local category = Settings.RegisterCanvasLayoutCategory(panel, "AldorTax")
+        category.ID = "AldorTax"
+        Settings.RegisterAddOnCategory(category)
+        panel._settingsCategory = category
+    end
     optionsPanel = panel
     return panel
 end
@@ -1116,10 +1033,9 @@ SlashCmdList["ALDORTAX"] = function(msg)
         end
     elseif msg == "config" then
         if not optionsPanel then BuildOptionsPanel() end
-        -- Must pass the frame, not the name string. Called twice: known Blizzard
-        -- bug where the first call scrolls to AddOns but doesn't select the addon.
-        InterfaceOptionsFrame_OpenToCategory(optionsPanel)
-        InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+        if optionsPanel and optionsPanel._settingsCategory then
+            Settings.OpenToCategory(optionsPanel._settingsCategory.ID)
+        end
     elseif msg:sub(1, 7) == "unblock" then
         local target = msg:sub(9)
         if target ~= "" and AldorTaxDB and AldorTaxDB.blocklist then
