@@ -53,6 +53,7 @@ local settings = {
     syncChannel  = true,   -- broadcast sync via AldorTaxSync custom channel
     syncGuild    = false,  -- broadcast sync via guild
     autoThank    = true,   -- auto /thank players who warn in /say
+    alwaysShowUI = false,  -- always show calibration UI instead of blink warnings
 }
 
 -- Forward-declare so the ADDON_LOADED closure (created before the definition) can see it
@@ -472,8 +473,13 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
             lastProximityCheck = now
             local wasNear = isNearLift
             isNearLift = CheckNearLift()
-            if syncUI and syncUI.SetCompact and wasNear ~= isNearLift then
-                syncUI.SetCompact(not isNearLift)
+            if syncUI and syncUI.SetCompact then
+                if settings.alwaysShowUI then
+                    syncUI.SetCompact(false)
+                    if not syncUI:IsShown() then syncUI:Show() end
+                elseif wasNear ~= isNearLift then
+                    syncUI.SetCompact(not isNearLift)
+                end
             end
         end
     end
@@ -1010,10 +1016,12 @@ BuildOptionsPanel = function()
 
     local cbThank   = MakeCheckbox(panel, behHdr, -4, "autoThank",
         "Auto-thank warnings", "Automatically /thank players who announce lift departures in /say.")
+    local cbAlways  = MakeCheckbox(panel, cbThank, nil, "alwaysShowUI",
+        "Always show calibration UI", "Show the progress bar panel instead of blinking text warnings.")
 
     panel:SetScript("OnShow", function()
         cbParty:Refresh(); cbChannel:Refresh(); cbGuild:Refresh()
-        cbThank:Refresh()
+        cbThank:Refresh(); cbAlways:Refresh()
     end)
 
     -- Register with Settings API
