@@ -1,7 +1,7 @@
-## Interface: 20001, 20003, 20006, 20012, 20100, 20101, 20102, 20103, 20200, 20202, 20203, 20300, 20302, 20303, 20400, 20401, 20402, 20403, 20501, 20502, 20503, 20504, 20505
+## Interface: 11508, 20505
 ## Title: Aldor Tax
-## Notes: Tracks elevator cycles (Aldor Rise, Great Lift). Warns before departure. Click to sync timing. Syncs with nearby players automatically.
-## Version: 0.4.0
+## Notes: Tracks elevator cycles (Aldor Rise, Great Lift, Deeprun Tram). Warns before departure. Click to sync timing. Syncs with nearby players automatically.
+## Version: 0.4.1
 ## Author: Fizziness
 ## SavedVariables: AldorTaxDB
 AldorTax.lua

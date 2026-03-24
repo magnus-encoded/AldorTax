@@ -8,14 +8,17 @@
 |----------|------|-------|
 | **Aldor Rise** | Shattrath City | 25 s |
 | **Great Lift** | Barrens / Thousand Needles | 30 s |
+| **Deeprun Tram** | Deeprun Tram (Experimental) | 143 s |
 
-The UI appears automatically when you enter one of these zones.
+The UI appears automatically when you enter one of these zones. Deeprun Tram support must be enabled in the Interface options.
 
 ## Features
 
 - **Departure warnings** — blinking red alert when the elevator is about to leave the top, orange warning when approaching and the lift is leaving soon
 - **Progress bar UI** — colour-coded bar showing the current phase of the elevator cycle (FALL / BOTTOM / RISE / TOP) with a live cursor and countdown
-- **Dual-lift display** — the Great Lift has two complementary platforms; the UI shows two vertical bars tracking each platform's physical height
+- **Dual-lift/Tram display** — the Great Lift has two complementary platforms; the Deeprun Tram has two trams. The UI shows two bars tracking each.
+- **Horizontal & Vertical layouts** — the UI adapts to show vertical bars for elevators and horizontal tracks for the tram.
+- **Orientation guides** — the Deeprun Tram UI includes "North/South" track labels and entrance portal icons to help you find the next departing tram.
 - **Click-to-sync** — click any segment of the bar as that phase begins to sync the timer to the live elevator; a 200ms reaction-time offset is applied automatically
 - **Player sync** — timing data is broadcast automatically every 45 seconds while you are near a tracked lift, and once more as you leave, so other players running the addon stay in sync
 - **Sync attribution** — the UI shows whether the current timer is local or received from another player
@@ -41,12 +44,23 @@ The UI appears automatically when you enter one of these zones.
 
 | Segment | Duration |
 |---------|----------|
-| FALL    | 7.5 s    |
-| BOTTOM  | 5.0 s    |
-| RISE    | 6.0 s    |
-| TOP     | 11.5 s   |
+| FALL    | 11.0 s   |
+| BOTTOM  | 4.0 s    |
+| RISE    | 11.0 s   |
+| TOP     | 4.0 s    |
 
 The Great Lift has two platforms running on complementary cycles — when one is at the top, the other is at the bottom.
+
+### Deeprun Tram (Experimental)
+
+| Segment | Duration |
+|---------|----------|
+| IF -> SW | 59.0 s   |
+| AT SW    | 13.0 s   |
+| SW -> IF | 58.0 s   |
+| AT IF    | 13.0 s   |
+
+The Deeprun Tram uses a 143-second cycle with two trams offset by half a cycle. Support for the tram is currently experimental and disabled by default. Enable it in the AldorTax settings panel.
 
 ## Usage
 
