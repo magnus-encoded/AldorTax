@@ -87,6 +87,15 @@ local LIFTS = {
     },
 }
 
+-- Remove lifts that don't exist in this client version
+do
+    local _, _, _, tocVersion = GetBuildInfo()
+    -- Great Lift was destroyed in Cataclysm (4.0+); interface >= 40000
+    if tocVersion and tocVersion >= 40000 then
+        LIFTS.greatlift = nil
+    end
+end
+
 -- ─── Shared config ───────────────────────────────────────────────────────────
 
 local APPROACH_WARNING_TIME = 10.0
@@ -1610,6 +1619,7 @@ function BuildSyncUI()
                     local rt = GetRealTime() - CLICK_REACTION_TIME - ps
                     SaveSync(activeLiftID, nil, nil, rt)
                     BroadcastSync(activeLiftID, rt)
+                    hb.setDepartStation("A")
                     Log(string.format("|cff00ff00AldorTax: %s synced at %s%s|r",
                         ld.displayName, nameA, primary and "" or " (2nd tram)"))
                 end)
@@ -1635,33 +1645,13 @@ function BuildSyncUI()
                     local rt = GetRealTime() - CLICK_REACTION_TIME - ps
                     SaveSync(activeLiftID, nil, nil, rt)
                     BroadcastSync(activeLiftID, rt)
+                    hb.setDepartStation("B")
                     Log(string.format("|cff00ff00AldorTax: %s synced at %s%s|r",
                         ld.displayName, nameB, primary and "" or " (2nd tram)"))
                 end)
             end
 
             if isCompact then LayoutTramCompact() else LayoutTramFull() end
-
-            -- Diagnostic: verify station buttons
-            C_Timer.After(0.1, function()
-                for i, hb in ipairs({ hbar1, hbar2 }) do
-                    local a, b = hb.btnA, hb.btnB
-                    local aL = a:GetLeft() or -1
-                    local aR = a:GetRight() or -1
-                    local bL = b:GetLeft() or -1
-                    local bR = b:GetRight() or -1
-                    local bgL = hb.bg:GetLeft() or -1
-                    local bgR = hb.bg:GetRight() or -1
-                    Log(string.format(
-                        "hbar%d: btnA[%.0f-%.0f vis=%s] bg[%.0f-%.0f] btnB[%.0f-%.0f vis=%s] strata=%s/%s/%s lvl=%d/%d/%d",
-                        i, aL, aR, tostring(a:IsShown()),
-                        bgL, bgR,
-                        bL, bR, tostring(b:IsShown()),
-                        a:GetFrameStrata(), hb.bg:GetFrameStrata(), b:GetFrameStrata(),
-                        a:GetFrameLevel(), hb.bg:GetFrameLevel(), b:GetFrameLevel()
-                    ))
-                end
-            end)
         elseif isDual then
             sayBtn:SetText("|cffffcc00Say Warning|r")
             ShowDual()
@@ -1714,18 +1704,26 @@ function BuildSyncUI()
         if isTram then
             if isCompact then
                 title:Hide(); sourceLabel:Hide(); sayBtn:Hide(); tyLabel:Hide()
-                for _, hb in ipairs({ hbar1, hbar2 }) do hb.btnA:Hide(); hb.btnB:Hide() end
+                for _, hb in ipairs({ hbar1, hbar2 }) do
+                    hb.btnA:Hide(); hb.btnB:Hide()
+                    if hb.row.trackLabel then hb.row.trackLabel:Hide() end
+                end
                 LayoutTramCompact()
             else
                 title:Show(); sourceLabel:Show(); sayIcon:Hide()
                 if AldorTaxDB and AldorTaxDB.ty and AldorTaxDB.ty > 0 then tyLabel:Show() end
                 for _, hb in ipairs({ hbar1, hbar2 }) do
                     hb.btnA:Show(); hb.btnB:Show()
+                    if hb.row.trackLabel then hb.row.trackLabel:Show() end
                     -- Restore anchor-based bg between buttons
                     hb.bg:ClearAllPoints()
                     hb.bg:SetPoint("LEFT", hb.btnA, "RIGHT", 5, 0)
                     hb.bg:SetPoint("RIGHT", hb.btnB, "LEFT", -5, 0)
                     hb.bg:SetHeight(HBAR_H + 6)
+                end
+                if tramContainer.portalL then
+                    tramContainer.portalL:Show(); tramContainer.portalLLbl:Show()
+                    tramContainer.portalR:Show(); tramContainer.portalRLbl:Show()
                 end
                 LayoutTramFull()
             end
