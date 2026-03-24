@@ -1572,10 +1572,20 @@ BuildOptionsPanel = function()
 
     local cbThank   = MakeCheckbox(panel, behHdr, -4, "autoThank",
         "Auto-thank warnings", "Automatically /thank players who announce lift departures in /say.")
-    local cbAlways  = MakeCheckbox(panel, cbThank, nil, "alwaysShowUI",
-        "Always show calibration UI", "Show the progress bar panel instead of blinking text warnings.")
-    local cbCompact = MakeCheckbox(panel, cbAlways, nil, "alwaysCompact",
-        "Always use compact UI", "Use the sleek, minimalist version of the progress bar.")
+    local alwaysHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    alwaysHdr:SetPoint("TOPLEFT", cbThank, "BOTTOMLEFT", 0, -6)
+    alwaysHdr:SetText("Always show:")
+    alwaysHdr:SetTextColor(0.9, 0.9, 0.9)
+
+    local cbAlways  = MakeCheckbox(panel, nil, nil, "alwaysShowUI",
+        "Calibration UI", "Show the full progress bar panel instead of blinking text warnings.")
+    cbAlways:ClearAllPoints()
+    cbAlways:SetPoint("LEFT", alwaysHdr, "RIGHT", 4, 0)
+
+    local cbCompact = MakeCheckbox(panel, nil, nil, "alwaysCompact",
+        "Compact UI", "Use the sleek, minimalist version of the progress bar.")
+    cbCompact:ClearAllPoints()
+    cbCompact:SetPoint("LEFT", cbAlways.label, "RIGHT", 12, 0)
 
     -- Mutual exclusion: enabling one disables the other
     cbAlways:HookScript("OnClick", function(self)
