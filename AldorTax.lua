@@ -8,6 +8,35 @@ local warnText = warnFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge"
 warnText:SetPoint("CENTER")
 warnText:SetScale(2)
 
+-- ─── Dev-mode timer overlay ──────────────────────────────────────────────────
+
+local devTimerStart = nil   -- GetTime() when dev mode was last enabled
+
+local devTimerFrame = CreateFrame("Frame", "AldorTaxDevTimer", UIParent, "BackdropTemplate")
+devTimerFrame:SetSize(160, 36)
+devTimerFrame:SetPoint("TOP", 0, -10)
+devTimerFrame:SetBackdrop({ bgFile = "Interface/Tooltips/UI-Tooltip-Background", tile = true, tileSize = 8 })
+devTimerFrame:SetBackdropColor(0, 0, 0, 0.65)
+devTimerFrame:SetMovable(true)
+devTimerFrame:EnableMouse(true)
+devTimerFrame:RegisterForDrag("LeftButton")
+devTimerFrame:SetScript("OnDragStart", devTimerFrame.StartMoving)
+devTimerFrame:SetScript("OnDragStop",  devTimerFrame.StopMovingOrSizing)
+devTimerFrame:Hide()
+
+local devTimerText = devTimerFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+devTimerText:SetPoint("CENTER")
+devTimerText:SetTextColor(1, 1, 0)
+
+devTimerFrame:SetScript("OnUpdate", function()
+    if devTimerStart then
+        local e = GetTime() - devTimerStart
+        local m = math.floor(e / 60)
+        local s = e % 60
+        devTimerText:SetText(string.format("%d:%05.2f", m, s))
+    end
+end)
+
 -- ─── Lift definitions ────────────────────────────────────────────────────────
 
 local LIFTS = {
@@ -15,9 +44,9 @@ local LIFTS = {
         id           = "aldor",
         displayName  = "Aldor Lift",
         fallTime     = 6.5,
-        riseTime     = 7.5,
+        riseTime     = 7.8,
         waitAtTop    = 6.0,
-        waitAtBottom = 5.0,
+        waitAtBottom = 4.7,
         cycleTime    = 25.0,
         mapX         = 0.4169,
         mapY         = 0.3860,
@@ -37,9 +66,9 @@ local LIFTS = {
     deepruntram = {
         id           = "deepruntram",
         displayName  = "Deeprun Tram",
-        fallTime     = 59.0,     -- travel IF -> SW
+        fallTime     = 58.5,     -- travel IF -> SW
         waitAtBottom = 13.0,     -- dwell at SW
-        riseTime     = 58.0,     -- travel SW -> IF
+        riseTime     = 58.5,     -- travel SW -> IF
         waitAtTop    = 13.0,     -- dwell at IF
         cycleTime    = 143.0,
         mapX         = 0, mapY = 0,
@@ -54,10 +83,10 @@ local LIFTS = {
         endpointB    = "SW",
         phaseNames   = { "TO SW", "AT SW", "TO IF", "AT IF" },
         segColors    = {
-            { r = 0.20, g = 0.45, b = 0.75 },  -- traveling to SW
-            { r = 0.55, g = 0.55, b = 0.65 },  -- waiting at SW
-            { r = 0.75, g = 0.45, b = 0.20 },  -- traveling to IF
-            { r = 0.65, g = 0.55, b = 0.55 },  -- waiting at IF
+            { r = 0.75, g = 0.45, b = 0.20 },  -- traveling to SW (orange = destination)
+            { r = 0.65, g = 0.55, b = 0.55 },  -- waiting at SW (warm gray)
+            { r = 0.20, g = 0.45, b = 0.75 },  -- traveling to IF (blue = destination)
+            { r = 0.55, g = 0.55, b = 0.65 },  -- waiting at IF (cool gray)
         },
     },
     greatlift = {
@@ -140,7 +169,6 @@ local settings = {
     debugChannel = false,
     autoThank    = true,
     alwaysShowUI = false,
-    alwaysCompact = false,
     enableTram = false,
 }
 
@@ -539,6 +567,10 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
     end
 end
 
+-- ─── Forward declarations (used by event handlers below, defined later) ─────
+local syncUI = nil
+local BuildSyncUI
+
 -- ─── Events ─────────────────────────────────────────────────────────────────
 
 local logicFrame = CreateFrame("Frame")
@@ -755,8 +787,6 @@ end)
 
 -- ─── Sync UI ────────────────────────────────────────────────────────────────
 
-syncUI = nil
-
 -- Returns 0.0 (bottom) to 1.0 (top) representing physical lift height at a
 -- given cycle phase.
 local function GetLiftHeight(phase, def)
@@ -799,7 +829,7 @@ end
 
 -- (VBarClickToPhase and GetPhaseColorMuted removed — dual-lift sync uses TOP/BTM buttons now)
 
-function BuildSyncUI()
+BuildSyncUI = function()
     if AldorTaxSyncUI then return AldorTaxSyncUI end
 
     local BAR_W_FULL    = 460
@@ -1237,11 +1267,19 @@ function BuildSyncUI()
         phaseLbl:SetShadowOffset(1, -1)
         phaseLbl:SetShadowColor(0, 0, 0, 1)
 
+        -- Compact endpoint labels (shown only in compact mode)
+        local compactLblA = bg:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        compactLblA:SetPoint("LEFT", bg, "LEFT", 4, 0)
+        compactLblA:SetScale(0.80)
+        compactLblA:Hide()
+        local compactLblB = bg:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        compactLblB:SetPoint("RIGHT", bg, "RIGHT", -4, 0)
+        compactLblB:SetScale(0.80)
+        compactLblB:Hide()
+
         -- ── Click handler for travel bar (departs) ──
-        local clickBtn = CreateFrame("Button", nil, row)
-        clickBtn:SetPoint("LEFT", btnA, "RIGHT", 5, 0)
-        clickBtn:SetPoint("RIGHT", btnB, "LEFT", -5, 0)
-        clickBtn:SetHeight(HBAR_H)
+        local clickBtn = CreateFrame("Button", nil, bg)
+        clickBtn:SetAllPoints(hover)
         clickBtn:SetFrameLevel(hover:GetFrameLevel() + 1)
         clickBtn:SetHighlightTexture("Interface/Buttons/ButtonHilight-Square", "ADD")
 
@@ -1311,6 +1349,7 @@ function BuildSyncUI()
             timeLabel = timeLbl, phaseLbl = phaseLbl,
             isPrimary = isPrimary, label = label,
             btnA = btnA, btnB = btnB,
+            compactLblA = compactLblA, compactLblB = compactLblB,
             setDepartStation = function(s) departStation = s end,
         }
     end
@@ -1324,17 +1363,10 @@ function BuildSyncUI()
     -- SHARED ELEMENTS
     -- ═════════════════════════════════════════════════════════════════════════
 
-    local sayBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    sayBtn:SetSize(130, 24)
-    sayBtn:SetText("|cffffcc00Say Warning|r")
-    sayBtn:SetNormalFontObject("GameFontNormalSmall")
-    sayBtn:SetHighlightFontObject("GameFontHighlightSmall")
-    local sayOverlay = sayBtn:CreateTexture(nil, "ARTWORK", nil, 2)
-    sayOverlay:SetColorTexture(0.7, 0.55, 0.05, 0.25)
-    sayOverlay:SetAllPoints()
-    p.sayBtn = sayBtn
-
-    sayBtn:SetScript("OnClick", function()
+    -- Shared say logic: callable directly from both sayBtn and sayIcon.
+    -- SendChatMessage requires a hardware event in the call chain, so both
+    -- callers must invoke this from their own OnClick — no Click() delegation.
+    local function DoSayPosition()
         if not activeLiftID then return end
         local def = LIFTS[activeLiftID]
         local st  = liftState[activeLiftID]
@@ -1344,31 +1376,25 @@ function BuildSyncUI()
         end
         local phase = (GetTime() - st.lastSync) % def.cycleTime
         if def.horizontal then
-            -- Tram: report each tram's direction and time to next arrival
             local nameA = def.endpointA or "A"
             local nameB = def.endpointB or "B"
             local phase2 = (phase + def.cycleTime / 2) % def.cycleTime
             local function tramLine(ph)
                 if ph < def.fallTime then
-                    -- Traveling A→B
                     local t = def.fallTime - ph
                     return string.format("[%s] -%ds-> [%s]", nameA, t, nameB)
                 elseif ph < def.fallTime + def.waitAtBottom then
-                    -- At B
                     local t = def.fallTime + def.waitAtBottom - ph
-                    return string.format("At [%s], departing in %ds", nameB, t)
+                    return string.format("At [%s], departs in %ds", nameB, t)
                 elseif ph < def.fallTime + def.waitAtBottom + def.riseTime then
-                    -- Traveling B→A
                     local t = def.fallTime + def.waitAtBottom + def.riseTime - ph
                     return string.format("[%s] <-%ds- [%s]", nameA, t, nameB)
                 else
-                    -- At A
                     local t = def.cycleTime - ph
-                    return string.format("At [%s], departing in %ds", nameA, t)
+                    return string.format("At [%s], departs in %ds", nameA, t)
                 end
             end
-            SendChatMessage("AldorTax: " .. tramLine(phase), "SAY")
-            SendChatMessage("AldorTax: " .. tramLine(phase2), "SAY")
+            SendChatMessage(string.format("AldorTax: North: %s | South: %s", tramLine(phase), tramLine(phase2)), "SAY")
         elseif def.dualLift then
             local ttfEast = def.cycleTime - phase
             local phase2 = (phase + def.cycleTime / 2) % def.cycleTime
@@ -1385,7 +1411,20 @@ function BuildSyncUI()
             SendChatMessage(string.format("AldorTax: Lift going down in: %.1f seconds", ttd), "SAY")
         end
         st.lastSayTime = GetTime()
-    end)
+    end
+    p.DoSayPosition = DoSayPosition  -- expose for external use if needed
+
+    local sayBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    sayBtn:SetSize(130, 24)
+    sayBtn:SetText("|cffffcc00Say Warning|r")
+    sayBtn:SetNormalFontObject("GameFontNormalSmall")
+    sayBtn:SetHighlightFontObject("GameFontHighlightSmall")
+    local sayOverlay = sayBtn:CreateTexture(nil, "ARTWORK", nil, 2)
+    sayOverlay:SetColorTexture(0.7, 0.55, 0.05, 0.25)
+    sayOverlay:SetAllPoints()
+    p.sayBtn = sayBtn
+
+    sayBtn:SetScript("OnClick", function() DoSayPosition() end)
 
     sayBtn:SetPoint("BOTTOM", p, "BOTTOM", 0, 8)
 
@@ -1403,10 +1442,10 @@ function BuildSyncUI()
     waves:SetAllPoints()
     sayIcon:SetHighlightTexture("Interface/Buttons/UI-Common-MouseHilight", "ADD")
     sayIcon:Hide()
-    sayIcon:SetScript("OnClick", function() sayBtn:Click() end)
+    sayIcon:SetScript("OnClick", function() DoSayPosition() end)
     sayIcon:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(isTram and "Report position" or "Say warning", 1, 0.82, 0, 1)
+        GameTooltip:SetText(isTram and "Say position" or "Say warning", 1, 0.82, 0, 1)
         GameTooltip:Show()
     end)
     sayIcon:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1504,18 +1543,20 @@ function BuildSyncUI()
         hbar1.row:SetSize(rowW, HBAR_H + 10)
 
         if not tramContainer.portalL then
-            local function CreatePortal(side)
+            local function CreatePortal(icon, label, cr, cg, cb)
                 local tex = tramContainer:CreateTexture(nil, "ARTWORK")
                 tex:SetSize(28, 28)
-                tex:SetTexture("Interface\\Icons\\Spell_Arcane_PortalStormwind")
+                tex:SetTexture(icon)
                 local lbl = tramContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                 lbl:SetPoint("TOP", tex, "BOTTOM", 0, -2)
-                lbl:SetText("ENTRANCE")
-                lbl:SetTextColor(0.5, 0.5, 0.8, 0.8)
+                lbl:SetText(label)
+                lbl:SetTextColor(cr, cg, cb, 0.8)
                 return tex, lbl
             end
-            tramContainer.portalL, tramContainer.portalLLbl = CreatePortal("LEFT")
-            tramContainer.portalR, tramContainer.portalRLbl = CreatePortal("RIGHT")
+            tramContainer.portalL, tramContainer.portalLLbl = CreatePortal(
+                "Interface\\Icons\\Spell_Arcane_PortalIronforge", "IF", 0.30, 0.55, 0.85)
+            tramContainer.portalR, tramContainer.portalRLbl = CreatePortal(
+                "Interface\\Icons\\Spell_Arcane_PortalStormwind", "SW", 0.85, 0.55, 0.30)
         end
 
         tramContainer.portalL:ClearAllPoints()
@@ -1530,34 +1571,104 @@ function BuildSyncUI()
         sayBtn:SetPoint("BOTTOM", p, "BOTTOM", 0, 8)
     end
 
+    -- ── Compact tram layout ───────────────────────────────────────────────
+    -- Scales the existing row architecture down: narrower travel bar, smaller
+    -- station buttons, no track labels or portal icons.  Station buttons remain
+    -- fully clickable (required for calibration).  sayIcon replaces sayBtn
+    -- and calls DoSayPosition() directly so SendChatMessage gets a real
+    -- hardware event.
+
+    local COMPACT_HBAR_W  = 180   -- travel bar width in compact mode (full = 400)
+    local COMPACT_BTN_W   = 30    -- station button width (full = 40)
+    local COMPACT_HBAR_H  = 16    -- bar height (full = 20)
+    local COMPACT_GAP     = 4     -- gap between hbar2 and hbar1 rows
+
     local function LayoutTramCompact()
-        local compactW = HBAR_W * 0.7
-        -- Compact: just the travel bars, no station buttons
-        local frameW = compactW + 6 + PAD * 2 + 28  -- bar + bg border + padding + sayIcon
-        local frameH = (HBAR_H + 6) * 2 + HBAR_GAP + PAD
+        local rowW = COMPACT_HBAR_W + COMPACT_BTN_W * 2 + 16
+        local rowH = COMPACT_HBAR_H + 8
+        -- Frame: two rows + gap + small top/bottom padding
+        local frameW = rowW + PAD * 2 + 28  -- +28 for sayIcon to the right
+        local frameH = rowH * 2 + COMPACT_GAP + 14
         p:SetSize(frameW, frameH)
 
         tramContainer:ClearAllPoints()
         tramContainer:SetPoint("TOPLEFT", p, "TOPLEFT", 0, 0)
         tramContainer:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", 0, 0)
 
-        -- Override bg to fixed size (buttons are hidden in compact)
-        hbar2.bg:ClearAllPoints()
-        hbar2.bg:SetPoint("TOP", tramContainer, "TOP", 0, -PAD / 2)
-        hbar2.bg:SetSize(compactW + 6, HBAR_H + 6)
+        -- Row 2 (south tram) on top, row 1 (north tram) below — same as full mode
+        hbar2.row:ClearAllPoints()
+        hbar2.row:SetPoint("TOPLEFT", tramContainer, "TOPLEFT", PAD, -6)
+        hbar2.row:SetSize(rowW, rowH)
 
-        hbar1.bg:ClearAllPoints()
-        hbar1.bg:SetPoint("TOP", hbar2.bg, "BOTTOM", 0, -HBAR_GAP)
-        hbar1.bg:SetSize(compactW + 6, HBAR_H + 6)
+        hbar1.row:ClearAllPoints()
+        hbar1.row:SetPoint("TOP", hbar2.row, "BOTTOM", 0, -COMPACT_GAP)
+        hbar1.row:SetSize(rowW, rowH)
 
+        -- Resize station buttons to compact size
+        for _, hb in ipairs({ hbar1, hbar2 }) do
+            hb.btnA:SetSize(COMPACT_BTN_W, rowH)
+            hb.btnB:SetSize(COMPACT_BTN_W, rowH)
+            -- Shrink button label font
+            hb.btnA.label:SetFontObject("GameFontNormalSmall")
+            hb.btnB.label:SetFontObject("GameFontNormalSmall")
+            -- bg auto-sizes via LEFT/RIGHT anchors between btnA and btnB
+            hb.bg:SetHeight(COMPACT_HBAR_H + 4)
+            -- Update fill widths to match the narrower bar
+            local innerW = COMPACT_HBAR_W - 6  -- hbar inset is 3px each side
+            hb.fillL:SetWidth(innerW / 2)
+            hb.fillR:SetWidth(innerW / 2)
+            -- Resize cursor and glow for the shorter bar height
+            hb.cursor:SetSize(3, COMPACT_HBAR_H + 2)
+            hb.glow:SetSize(8, COMPACT_HBAR_H + 4)
+        end
+
+        -- Hide decorative elements
         if tramContainer.portalL then
             tramContainer.portalL:Hide(); tramContainer.portalLLbl:Hide()
             tramContainer.portalR:Hide(); tramContainer.portalRLbl:Hide()
         end
+        -- Hide track labels
+        if hbar1.row.trackLabel then hbar1.row.trackLabel:Hide() end
+        if hbar2.row.trackLabel then hbar2.row.trackLabel:Hide() end
 
+        -- Position sayIcon to the right of the rows
         sayIcon:ClearAllPoints()
-        sayIcon:SetPoint("LEFT", hbar2.bg, "RIGHT", 4, 0)
+        sayIcon:SetPoint("LEFT", hbar1.row, "RIGHT", 6, 0)
+        sayIcon:SetSize(20, 20)
         sayIcon:Show()
+    end
+
+    -- Restore full-size tram layout after leaving compact mode
+    local function RestoreTramFull()
+        local rowW = HBAR_W + STATION_BTN_W * 2 + 16
+        local rowH = HBAR_H + 10
+
+        -- Restore station buttons to full size
+        for _, hb in ipairs({ hbar1, hbar2 }) do
+            hb.btnA:SetSize(STATION_BTN_W, rowH)
+            hb.btnB:SetSize(STATION_BTN_W, rowH)
+            hb.btnA.label:SetFontObject("GameFontNormal")
+            hb.btnB.label:SetFontObject("GameFontNormal")
+            hb.bg:SetHeight(HBAR_H + 6)
+            local innerW = HBAR_W - 6
+            hb.fillL:SetWidth(innerW / 2)
+            hb.fillR:SetWidth(innerW / 2)
+            hb.cursor:SetSize(3, HBAR_H + 4)
+            hb.glow:SetSize(10, HBAR_H + 6)
+        end
+
+        -- Show track labels
+        if hbar1.row.trackLabel then hbar1.row.trackLabel:Show() end
+        if hbar2.row.trackLabel then hbar2.row.trackLabel:Show() end
+
+        -- Show portals
+        if tramContainer.portalL then
+            tramContainer.portalL:Show(); tramContainer.portalLLbl:Show()
+            tramContainer.portalR:Show(); tramContainer.portalRLbl:Show()
+        end
+
+        -- Re-run full layout (repositions rows, frame size, portals, sayBtn)
+        LayoutTramFull()
     end
 
     -- ── Reconfigure for a different lift ─────────────────────────────────────
@@ -1565,6 +1676,7 @@ function BuildSyncUI()
         local def = LIFTS[liftID]
         if not def then return end
         curLiftID = liftID
+        p.curLiftID = liftID  -- expose on frame for external guard
         isDual = def.dualLift and true or false
         isTram = def.horizontal and true or false
         if isDual then
@@ -1575,7 +1687,7 @@ function BuildSyncUI()
 
         if isTram then
             ShowTram()
-            sayBtn:SetText("|cffffcc00Report Position|r")
+            sayBtn:SetText("|cffffcc00Say Position|r")
 
             -- Track labels (Bottom = North, Top = South)
             hbar1.row.trackLabel = hbar1.row.trackLabel or hbar1.row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1597,6 +1709,12 @@ function BuildSyncUI()
 
             for _, hb in ipairs({ hbar1, hbar2 }) do
                 local primary = hb.isPrimary
+                hb.setDepartStation(nil)  -- reset stale departure context
+                -- Configure compact endpoint labels
+                hb.compactLblA:SetText(nameA)
+                hb.compactLblA:SetTextColor(colorA[1], colorA[2], colorA[3], primary and 0.9 or 0.6)
+                hb.compactLblB:SetText(nameB)
+                hb.compactLblB:SetTextColor(colorB[1], colorB[2], colorB[3], primary and 0.9 or 0.6)
                 -- Configure station button A (left)
                 hb.btnA.label:SetText(nameA)
                 hb.btnA:SetBackdropColor(colorA[1] * 0.45, colorA[2] * 0.45, colorA[3] * 0.45, 0.95)
@@ -1651,7 +1769,11 @@ function BuildSyncUI()
                 end)
             end
 
-            if isCompact then LayoutTramCompact() else LayoutTramFull() end
+            if isCompact then
+                LayoutTramCompact()
+            else
+                LayoutTramFull()
+            end
         elseif isDual then
             sayBtn:SetText("|cffffcc00Say Warning|r")
             ShowDual()
@@ -1704,28 +1826,11 @@ function BuildSyncUI()
         if isTram then
             if isCompact then
                 title:Hide(); sourceLabel:Hide(); sayBtn:Hide(); tyLabel:Hide()
-                for _, hb in ipairs({ hbar1, hbar2 }) do
-                    hb.btnA:Hide(); hb.btnB:Hide()
-                    if hb.row.trackLabel then hb.row.trackLabel:Hide() end
-                end
                 LayoutTramCompact()
             else
                 title:Show(); sourceLabel:Show(); sayIcon:Hide()
                 if AldorTaxDB and AldorTaxDB.ty and AldorTaxDB.ty > 0 then tyLabel:Show() end
-                for _, hb in ipairs({ hbar1, hbar2 }) do
-                    hb.btnA:Show(); hb.btnB:Show()
-                    if hb.row.trackLabel then hb.row.trackLabel:Show() end
-                    -- Restore anchor-based bg between buttons
-                    hb.bg:ClearAllPoints()
-                    hb.bg:SetPoint("LEFT", hb.btnA, "RIGHT", 5, 0)
-                    hb.bg:SetPoint("RIGHT", hb.btnB, "LEFT", -5, 0)
-                    hb.bg:SetHeight(HBAR_H + 6)
-                end
-                if tramContainer.portalL then
-                    tramContainer.portalL:Show(); tramContainer.portalLLbl:Show()
-                    tramContainer.portalR:Show(); tramContainer.portalRLbl:Show()
-                end
-                LayoutTramFull()
+                RestoreTramFull()
             end
         elseif isDual then
             if isCompact then
@@ -1780,9 +1885,17 @@ function BuildSyncUI()
     end
 
     -- ── Cursor update ───────────────────────────────────────────────────────
-    local function UpdateHBarCursor(hbarObj, phase, def, barWidth, primary)
+    local function UpdateHBarCursor(hbarObj, phase, def, primary)
+        local barWidth = hbarObj.overlay:GetWidth()
         local pos = GetTramPosition(phase, def)
-        local r, g, b = GetPhaseColor(phase, def)
+        -- Use tram-specific segment colors instead of elevator colors
+        local seg
+        if phase < def.fallTime then seg = 1
+        elseif phase < def.fallTime + def.waitAtBottom then seg = 2
+        elseif phase < def.fallTime + def.waitAtBottom + def.riseTime then seg = 3
+        else seg = 4 end
+        local sc = def.segColors and def.segColors[seg]
+        local r, g, b = sc and sc.r or 0.5, sc and sc.g or 0.5, sc and sc.b or 0.5
         local alpha = primary and 0.90 or 0.60
         local glowAlpha = primary and 0.25 or 0.12
 
@@ -1801,8 +1914,18 @@ function BuildSyncUI()
         else phaseName = names[4] end
         hbarObj.phaseLbl:SetText(phaseName)
         hbarObj.phaseLbl:SetTextColor(r, g, b, primary and 0.85 or 0.55)
+        -- Clamp phase label to stay within bar bounds
+        local clampMin = 20
+        local clampMax = barWidth - 20
+        local cursorX = pos * barWidth
         hbarObj.phaseLbl:ClearAllPoints()
-        hbarObj.phaseLbl:SetPoint("BOTTOM", hbarObj.cursor, "TOP", 0, 2)
+        if cursorX < clampMin then
+            hbarObj.phaseLbl:SetPoint("BOTTOMLEFT", hbarObj.overlay, "TOPLEFT", 2, 2)
+        elseif cursorX > clampMax then
+            hbarObj.phaseLbl:SetPoint("BOTTOMRIGHT", hbarObj.overlay, "TOPRIGHT", -2, 2)
+        else
+            hbarObj.phaseLbl:SetPoint("BOTTOM", hbarObj.cursor, "TOP", 0, 2)
+        end
 
         -- Countdown to next event (arrival or departure)
         local ttd
@@ -1821,7 +1944,13 @@ function BuildSyncUI()
         end
         hbarObj.timeLabel:SetText(string.format("%.0fs", ttd))
         hbarObj.timeLabel:ClearAllPoints()
-        hbarObj.timeLabel:SetPoint("TOP", hbarObj.cursor, "BOTTOM", 0, -2)
+        if cursorX < clampMin then
+            hbarObj.timeLabel:SetPoint("TOPLEFT", hbarObj.overlay, "BOTTOMLEFT", 2, -2)
+        elseif cursorX > clampMax then
+            hbarObj.timeLabel:SetPoint("TOPRIGHT", hbarObj.overlay, "BOTTOMRIGHT", -2, -2)
+        else
+            hbarObj.timeLabel:SetPoint("TOP", hbarObj.cursor, "BOTTOM", 0, -2)
+        end
     end
 
     local function ParkHBarCursor(hbarObj)
@@ -1842,7 +1971,6 @@ function BuildSyncUI()
 
         if isTram then
             -- Dual horizontal bars
-            local barWidth = isCompact and (HBAR_W * 0.7) or HBAR_W
             if st.lastSync <= 0 then
                 ParkHBarCursor(hbar1)
                 ParkHBarCursor(hbar2)
@@ -1853,8 +1981,8 @@ function BuildSyncUI()
 
             local phase1 = (GetTime() - st.lastSync) % def.cycleTime
             local phase2 = (phase1 + def.cycleTime / 2) % def.cycleTime
-            UpdateHBarCursor(hbar1, phase1, def, barWidth, true)
-            UpdateHBarCursor(hbar2, phase2, def, barWidth, false)
+            UpdateHBarCursor(hbar1, phase1, def, true)
+            UpdateHBarCursor(hbar2, phase2, def, false)
 
             if st.lastSyncSource then
                 sourceLabel:SetText(string.format("|cff88ff88received from %s|r", st.lastSyncSource.name))
@@ -1963,27 +2091,19 @@ function BuildSyncUI()
             end
         end
 
-        -- Show Say button during dwell/station phases
+        -- Show Say button
         if isCompact or st.lastSync <= 0 then
             sayBtn:Hide()
+        elseif isTram then
+            -- Tram: always show Report Position when synced (transit info is useful)
+            sayBtn:Show()
         else
             local topStart = def.fallTime + def.waitAtBottom + def.riseTime
-            local btmStart = def.fallTime
-            local btmEnd   = def.fallTime + def.waitAtBottom
             local phase = (GetTime() - st.lastSync) % def.cycleTime
-            local showSay
-            if def.horizontal then
-                -- Tram: show during any dwell phase of either tram
-                local inDwell1 = phase >= topStart or (phase >= btmStart and phase < btmEnd)
+            local showSay = phase >= topStart
+            if def.dualLift then
                 local phase2 = (phase + def.cycleTime / 2) % def.cycleTime
-                local inDwell2 = phase2 >= topStart or (phase2 >= btmStart and phase2 < btmEnd)
-                showSay = inDwell1 or inDwell2
-            else
-                showSay = phase >= topStart
-                if def.dualLift then
-                    local phase2 = (phase + def.cycleTime / 2) % def.cycleTime
-                    showSay = showSay or phase2 >= topStart
-                end
+                showSay = showSay or phase2 >= topStart
             end
             if showSay then sayBtn:Show() else sayBtn:Hide() end
         end
@@ -2269,6 +2389,16 @@ SlashCmdList["ALDORTAX"] = function(msg)
         else
             print("|cffffff00  Nameplates: (none visible)|r")
         end
+    elseif msg == "dev" then
+        if devTimerFrame:IsShown() then
+            devTimerFrame:Hide()
+            devTimerStart = nil
+            print("|cff00ff00AldorTax: Dev timer hidden.|r")
+        else
+            devTimerStart = GetTime()
+            devTimerFrame:Show()
+            print("|cff00ff00AldorTax: Dev timer started — drag to reposition.|r")
+        end
     elseif msg == "" or msg == "help" then
         print("|cffffff00AldorTax Commands:|r")
         print("  /atax sync          — sync at departure + broadcast")
@@ -2278,6 +2408,7 @@ SlashCmdList["ALDORTAX"] = function(msg)
         print("  /atax log           — toggle copyable log panel")
         print("  /atax testmsg       — whisper yourself to test addon messaging")
         print("  /atax unblock Name-Realm  — remove from blocklist")
+        print("  /atax dev           — toggle dev timer overlay (for video calibration)")
     else
         print("|cffff0000AldorTax: Unknown command '" .. msg .. "'. Type /atax help for options.|r")
     end
