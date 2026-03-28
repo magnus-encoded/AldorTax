@@ -848,13 +848,24 @@ BuildSyncUI = function()
     -- ── Main frame ──────────────────────────────────────────────────────────
     local p = CreateFrame("Frame", "AldorTaxSyncUI", UIParent, "BackdropTemplate")
     p:SetSize(BAR_W_FULL + PAD * 2, 94)
-    p:SetPoint("TOP", UIParent, "TOP", 0, -120)
+    if AldorTaxDB and AldorTaxDB.windowPos then
+        local wp = AldorTaxDB.windowPos
+        p:SetPoint(wp.point, UIParent, wp.relPoint, wp.x, wp.y)
+    else
+        p:SetPoint("TOP", UIParent, "TOP", 0, -120)
+    end
     p:SetFrameStrata("MEDIUM")
     p:SetMovable(true)
     p:EnableMouse(true)
     p:RegisterForDrag("LeftButton")
     p:SetScript("OnDragStart", p.StartMoving)
-    p:SetScript("OnDragStop",  p.StopMovingOrSizing)
+    p:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        if AldorTaxDB then
+            local point, _, relPoint, x, y = self:GetPoint(1)
+            AldorTaxDB.windowPos = { point = point, relPoint = relPoint, x = x, y = y }
+        end
+    end)
     p:SetBackdrop({
         bgFile   = "Interface/ChatFrame/ChatFrameBackground",
         edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
