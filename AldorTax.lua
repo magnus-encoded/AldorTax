@@ -76,7 +76,7 @@ local LIFTS = {
         nearYards    = 999,      -- subzone detection only
         zones        = { ["Deeprun Tram"] = true },
         nearSubzones = { ["Deeprun Tram"] = true },
-        deathZones   = { ["Deeprun Tram"] = true },
+        deathZones   = nil,
         dualLift     = true,
         horizontal   = true,
         endpointA    = "IF",
@@ -92,11 +92,11 @@ local LIFTS = {
     greatlift = {
         id           = "greatlift",
         displayName  = "Great Lift",
-        fallTime     = 11.0,
-        riseTime     = 11.0,
-        waitAtTop    = 4.0,
-        waitAtBottom = 4.0,
-        cycleTime    = 30.0,
+        fallTime     = 9.65,
+        riseTime     = 9.70,
+        waitAtTop    = 5.20,
+        waitAtBottom = 5.25,
+        cycleTime    = 29.80,
         mapX         = 0.3222,  -- midpoint of east/west for general proximity
         mapY         = 0.2407,
         mapScale     = 1000,
@@ -167,6 +167,8 @@ local settings = {
     syncParty    = true,
     syncChannel  = true,
     debugChannel = false,
+    verbose      = false,
+    segmentInput = false,
     autoThank    = true,
     alwaysShowUI = false,
     enableTram = false,
@@ -181,7 +183,7 @@ local logLines = {}
 local logEB    = nil
 
 local function Log(msg)
-    print(msg)
+    if settings.verbose then print(msg) end
     -- Strip WoW color codes for the copyable log editbox
     local clean = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
     local stamp = string.format("[%.1f] ", GetTime())
@@ -291,6 +293,29 @@ local function SaveSync(liftID, sourceName, sourceRealm, realTime)
     dbLift.lastSyncRealTime = realNow
     st.lastSyncSource = sourceName and { name = sourceName, realm = sourceRealm or "" } or nil
     dbLift.lastSyncSource = st.lastSyncSource
+end
+
+-- Log how much a local calibration click shifts the predicted phase.
+-- Called just before st.lastSync is overwritten.
+local function LogSyncCorrection(liftID, newSyncTime)
+    local st  = liftState[liftID]
+    local def = LIFTS[liftID]
+    if not st or not def or st.lastSync <= 0 then return end
+    local oldPhase = (GetTime() - st.lastSync) % def.cycleTime
+    local newPhase = (GetTime() - newSyncTime) % def.cycleTime
+    local correction = newPhase - oldPhase
+    -- Wrap to [-halfCycle, +halfCycle]
+    local half = def.cycleTime / 2
+    if correction > half then correction = correction - def.cycleTime end
+    if correction < -half then correction = correction + def.cycleTime end
+    -- Also log the epoch offset: if lifts are epoch-anchored,
+    -- newSyncTime % cycleTime should be constant across all syncs.
+    local epochOffset = newSyncTime % def.cycleTime
+    if not AldorTaxDB.syncLog then AldorTaxDB.syncLog = {} end
+    table.insert(AldorTaxDB.syncLog, string.format(
+        "%s|%s|CORRECTION|%.3f|%.3f|%.3f",
+        date("%Y-%m-%d %H:%M:%S"), liftID, GetTime(), correction, epochOffset))
+    Log(string.format("AldorTax: sync correction: %+.3fs (epoch offset: %.3f)", correction, epochOffset))
 end
 
 local function RestoreSync()
@@ -527,15 +552,15 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
         if not phase or not LIFTS[liftID] then return end
         if IsHardBlocked(name, realm) then return end
         if IsSoftBlocked(name, realm) then
-            print(string.format("|cffff6600AldorTax: Ignored sync from soft-blocked %s-%s|r", name, realm))
+            Log(string.format("|cffff6600AldorTax: Ignored sync from soft-blocked %s-%s|r", name, realm))
             return
         end
         ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, top)
         if fall then
-            print(string.format("|cff00ff00AldorTax: %s sync from %s (%.2f+%.2f+%.2f+%.2f=%.2fs)|r",
+            Log(string.format("|cff00ff00AldorTax: %s sync from %s (%.2f+%.2f+%.2f+%.2f=%.2fs)|r",
                 LIFTS[liftID].displayName, name, fall, bottom, rise, top, fall + bottom + rise + top))
         else
-            print(string.format("|cff00ff00AldorTax: %s sync from %s-%s|r", LIFTS[liftID].displayName, name, realm))
+            Log(string.format("|cff00ff00AldorTax: %s sync from %s-%s|r", LIFTS[liftID].displayName, name, realm))
         end
 
     elseif msgType == "D" then
@@ -947,6 +972,7 @@ BuildSyncUI = function()
             local starts = { [0] = 0, def.fallTime, def.fallTime + def.waitAtBottom,
                              def.fallTime + def.waitAtBottom + def.riseTime }
             local phaseStart = starts[phaseIdx]
+            LogSyncCorrection(activeLiftID, now - phaseStart)
             st.lastSync = now - phaseStart
             st.lastAutoBroadcast = GetTime()
             local rt = GetRealTime() - CLICK_REACTION_TIME - phaseStart
@@ -1152,6 +1178,7 @@ BuildSyncUI = function()
             phaseStart = (phaseStart + def.cycleTime / 2) % def.cycleTime
         end
         local now = GetTime() - CLICK_REACTION_TIME
+        LogSyncCorrection(activeLiftID, now - phaseStart)
         st.lastSync = now - phaseStart
         st.lastAutoBroadcast = GetTime()
         local rt = GetRealTime() - CLICK_REACTION_TIME - phaseStart
@@ -1294,21 +1321,40 @@ BuildSyncUI = function()
         clickBtn:SetFrameLevel(hover:GetFrameLevel() + 1)
         clickBtn:SetHighlightTexture("Interface/Buttons/ButtonHilight-Square", "ADD")
 
-        -- Last station context: set by station button clicks, used by depart button
-        local departStation = nil  -- "A" or "B"
+        -- Derive departure station from timer phase (dwell phases only)
+        local function getDepartStation()
+            if not activeLiftID then return nil end
+            local def = LIFTS[activeLiftID]
+            local st  = liftState[activeLiftID]
+            if st.lastSync <= 0 then return nil end
+            local p = (GetTime() - st.lastSync) % def.cycleTime
+            if not isPrimary and def.dualLift then
+                p = (p + def.cycleTime / 2) % def.cycleTime
+            end
+            -- dwell at B (SW): phase [fallTime, fallTime+waitAtBottom)
+            if p >= def.fallTime and p < def.fallTime + def.waitAtBottom then
+                return "B"
+            end
+            -- dwell at A (IF): phase [fallTime+waitAtBottom+riseTime, cycleTime)
+            if p >= def.fallTime + def.waitAtBottom + def.riseTime then
+                return "A"
+            end
+            return nil  -- in transit
+        end
 
         clickBtn:SetScript("OnEnter", function(self)
             if not activeLiftID then return end
             local def = LIFTS[activeLiftID]
-            local stationName = departStation == "B" and (def.endpointB or "B")
-                or departStation == "A" and (def.endpointA or "A")
+            local ds = getDepartStation()
+            local stationName = ds == "B" and (def.endpointB or "B")
+                or ds == "A" and (def.endpointA or "A")
                 or nil
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             if stationName then
                 GameTooltip:SetText("Click when tram departs " .. stationName, 1, 0.82, 0, 1)
             else
                 GameTooltip:SetText("Click when tram departs", 1, 0.82, 0, 1)
-                GameTooltip:AddLine("Click a station button first to set context", 0.7, 0.7, 0.7)
+                GameTooltip:AddLine("Sync first, or click during a dwell phase", 0.7, 0.7, 0.7)
             end
             GameTooltip:Show()
         end)
@@ -1318,32 +1364,22 @@ BuildSyncUI = function()
             if not activeLiftID then return end
             local def = LIFTS[activeLiftID]
             local st  = liftState[activeLiftID]
+            local ds = getDepartStation()
             local phaseStart, phaseName
-            if departStation == "B" then
+            if ds == "B" then
                 phaseStart = def.fallTime + def.waitAtBottom
                 phaseName = "departs " .. (def.endpointB or "B")
-            elseif departStation == "A" then
+            elseif ds == "A" then
                 phaseStart = 0
                 phaseName = "departs " .. (def.endpointA or "A")
             else
-                -- No station context: fall back to cursor position
-                local cursorX = GetCursorPosition()
-                local scale = self:GetEffectiveScale()
-                local left, right = self:GetLeft(), self:GetRight()
-                if not left or not right or left == right then return end
-                local frac = ((cursorX / scale) - left) / (right - left)
-                if frac < 0.5 then
-                    phaseStart = 0
-                    phaseName = "departs " .. (def.endpointA or "A")
-                else
-                    phaseStart = def.fallTime + def.waitAtBottom
-                    phaseName = "departs " .. (def.endpointB or "B")
-                end
+                return  -- in transit or no sync — ignore click
             end
             if not isPrimary and def.dualLift then
                 phaseStart = (phaseStart + def.cycleTime / 2) % def.cycleTime
             end
             local now = GetTime() - CLICK_REACTION_TIME
+            LogSyncCorrection(activeLiftID, now - phaseStart)
             st.lastSync = now - phaseStart
             st.lastAutoBroadcast = GetTime()
             local rt = GetRealTime() - CLICK_REACTION_TIME - phaseStart
@@ -1361,7 +1397,7 @@ BuildSyncUI = function()
             isPrimary = isPrimary, label = label,
             btnA = btnA, btnB = btnB,
             compactLblA = compactLblA, compactLblB = compactLblB,
-            setDepartStation = function(s) departStation = s end,
+            getDepartStation = getDepartStation,
         }
     end
 
@@ -1374,38 +1410,43 @@ BuildSyncUI = function()
     -- SHARED ELEMENTS
     -- ═════════════════════════════════════════════════════════════════════════
 
-    -- Shared say logic: callable directly from both sayBtn and sayIcon.
-    -- SendChatMessage requires a hardware event in the call chain, so both
-    -- callers must invoke this from their own OnClick — no Click() delegation.
-    local function DoSayPosition()
-        if not activeLiftID then return end
+    -- Build the /say message text for the current lift state.
+    -- Returns nil if no sync or no active lift.
+    local function BuildSayMessage()
+        if not activeLiftID then return nil end
         local def = LIFTS[activeLiftID]
         local st  = liftState[activeLiftID]
         if st.lastSync <= 0 then
             print("|cffff6600AldorTax: No sync — nothing to announce.|r")
-            return
+            return nil
         end
         local phase = (GetTime() - st.lastSync) % def.cycleTime
         if def.horizontal then
-            local nameA = def.endpointA or "A"
-            local nameB = def.endpointB or "B"
-            local phase2 = (phase + def.cycleTime / 2) % def.cycleTime
-            local function tramLine(ph)
-                if ph < def.fallTime then
-                    local t = def.fallTime - ph
-                    return string.format("[%s] -%ds-> [%s]", nameA, t, nameB)
-                elseif ph < def.fallTime + def.waitAtBottom then
-                    local t = def.fallTime + def.waitAtBottom - ph
-                    return string.format("At [%s], departs in %ds", nameB, t)
-                elseif ph < def.fallTime + def.waitAtBottom + def.riseTime then
-                    local t = def.fallTime + def.waitAtBottom + def.riseTime - ph
-                    return string.format("[%s] <-%ds- [%s]", nameA, t, nameB)
-                else
-                    local t = def.cycleTime - ph
-                    return string.format("At [%s], departs in %ds", nameA, t)
-                end
+            local nameA = def.endpointA or "A"  -- IF
+            local nameB = def.endpointB or "B"  -- SW
+            -- Phase tracks the "North" tram. South is offset by half cycle.
+            -- Show per-station info with track name so players know which platform.
+            if phase < def.fallTime then
+                -- North heading to SW, South heading to IF
+                local t = def.fallTime - phase
+                return string.format("AldorTax Tram: South arrives %s in %02.0fs", nameA, t),
+                       string.format("AldorTax Tram: North arrives %s in %02.0fs", nameB, t)
+            elseif phase < def.fallTime + def.waitAtBottom then
+                -- North docked at SW, South docked at IF
+                local t = def.fallTime + def.waitAtBottom - phase
+                return string.format("AldorTax Tram: South departs %s in %02.0fs", nameA, t),
+                       string.format("AldorTax Tram: North departs %s in %02.0fs", nameB, t)
+            elseif phase < def.fallTime + def.waitAtBottom + def.riseTime then
+                -- North heading to IF, South heading to SW
+                local t = def.fallTime + def.waitAtBottom + def.riseTime - phase
+                return string.format("AldorTax Tram: North arrives %s in %02.0fs", nameA, t),
+                       string.format("AldorTax Tram: South arrives %s in %02.0fs", nameB, t)
+            else
+                -- North docked at IF, South docked at SW
+                local t = def.cycleTime - phase
+                return string.format("AldorTax Tram: North departs %s in %02.0fs", nameA, t),
+                       string.format("AldorTax Tram: South departs %s in %02.0fs", nameB, t)
             end
-            SendChatMessage(string.format("AldorTax: North: %s | South: %s", tramLine(phase), tramLine(phase2)), "SAY")
         elseif def.dualLift then
             local ttfEast = def.cycleTime - phase
             local phase2 = (phase + def.cycleTime / 2) % def.cycleTime
@@ -1416,14 +1457,25 @@ BuildSyncUI = function()
             else
                 platName, ttf = "West", ttfWest
             end
-            SendChatMessage(string.format("AldorTax: %s lift going down in: %.1f seconds", platName, ttf), "SAY")
+            return string.format("AldorTax: %s lift going down in: %.1f seconds", platName, ttf)
         else
             local ttd = def.cycleTime - phase
-            SendChatMessage(string.format("AldorTax: Lift going down in: %.1f seconds", ttd), "SAY")
+            return string.format("AldorTax: Lift going down in: %.1f seconds", ttd)
         end
-        st.lastSayTime = GetTime()
     end
-    p.DoSayPosition = DoSayPosition  -- expose for external use if needed
+
+    -- Say the current position via SendChatMessage (works indoors without hardware event)
+    local function DoSayPosition()
+        local msg1, msg2 = BuildSayMessage()
+        if msg1 then
+            SendChatMessage(msg1, "SAY")
+            if msg2 then SendChatMessage(msg2, "SAY") end
+            if activeLiftID then
+                local st = liftState[activeLiftID]
+                if st then st.lastSayTime = GetTime() end
+            end
+        end
+    end
 
     local sayBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     sayBtn:SetSize(130, 24)
@@ -1586,8 +1638,7 @@ BuildSyncUI = function()
     -- Scales the existing row architecture down: narrower travel bar, smaller
     -- station buttons, no track labels or portal icons.  Station buttons remain
     -- fully clickable (required for calibration).  sayIcon replaces sayBtn
-    -- and calls DoSayPosition() directly so SendChatMessage gets a real
-    -- hardware event.
+    -- and calls DoSayPosition() on click, same as sayBtn.
 
     local COMPACT_HBAR_W  = 180   -- travel bar width in compact mode (full = 400)
     local COMPACT_BTN_W   = 30    -- station button width (full = 40)
@@ -1688,7 +1739,7 @@ BuildSyncUI = function()
         if not def then return end
         curLiftID = liftID
         p.curLiftID = liftID  -- expose on frame for external guard
-        isDual = def.dualLift and true or false
+        isDual = def.dualLift and not settings.segmentInput and true or false
         isTram = def.horizontal and true or false
         if isDual then
             title:SetText(def.displayName .. "  |cff888888click segment to sync|r")
@@ -1720,7 +1771,7 @@ BuildSyncUI = function()
 
             for _, hb in ipairs({ hbar1, hbar2 }) do
                 local primary = hb.isPrimary
-                hb.setDepartStation(nil)  -- reset stale departure context
+                -- departure context derived from timer phase (no manual state to reset)
                 -- Configure compact endpoint labels
                 hb.compactLblA:SetText(nameA)
                 hb.compactLblA:SetTextColor(colorA[1], colorA[2], colorA[3], primary and 0.9 or 0.6)
@@ -1743,12 +1794,13 @@ BuildSyncUI = function()
                     local ps = atA
                     if not primary and ld.dualLift then ps = (ps + ld.cycleTime / 2) % ld.cycleTime end
                     local now = GetTime() - CLICK_REACTION_TIME
+                    LogSyncCorrection(activeLiftID, now - ps)
                     st.lastSync = now - ps
                     st.lastAutoBroadcast = GetTime()
                     local rt = GetRealTime() - CLICK_REACTION_TIME - ps
                     SaveSync(activeLiftID, nil, nil, rt)
                     BroadcastSync(activeLiftID, rt)
-                    hb.setDepartStation("A")
+                    -- departure context now derived from timer phase
                     Log(string.format("|cff00ff00AldorTax: %s synced at %s%s|r",
                         ld.displayName, nameA, primary and "" or " (2nd tram)"))
                 end)
@@ -1769,12 +1821,13 @@ BuildSyncUI = function()
                     local ps = atB
                     if not primary and ld.dualLift then ps = (ps + ld.cycleTime / 2) % ld.cycleTime end
                     local now = GetTime() - CLICK_REACTION_TIME
+                    LogSyncCorrection(activeLiftID, now - ps)
                     st.lastSync = now - ps
                     st.lastAutoBroadcast = GetTime()
                     local rt = GetRealTime() - CLICK_REACTION_TIME - ps
                     SaveSync(activeLiftID, nil, nil, rt)
                     BroadcastSync(activeLiftID, rt)
-                    hb.setDepartStation("B")
+                    -- departure context now derived from timer phase
                     Log(string.format("|cff00ff00AldorTax: %s synced at %s%s|r",
                         ld.displayName, nameB, primary and "" or " (2nd tram)"))
                 end)
@@ -2255,9 +2308,11 @@ BuildOptionsPanel = function()
         "AldorTaxSync channel", "Broadcast to the shared AldorTaxSync custom channel.")
     local cbDebug   = MakeCheckbox(panel, cbChannel, nil, "debugChannel",
         "Debug channel",  "Log all outgoing sync messages to chat for debugging.")
+    local cbVerbose = MakeCheckbox(panel, cbDebug, nil, "verbose",
+        "Verbose chat",   "Print sync and calibration messages to the chat window. Messages are always recorded in the log (/atax log).")
 
     local behHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    behHdr:SetPoint("TOPLEFT", cbDebug, "BOTTOMLEFT", 0, -16)
+    behHdr:SetPoint("TOPLEFT", cbVerbose, "BOTTOMLEFT", 0, -16)
     behHdr:SetText("Behaviour")
 
     local cbThank   = MakeCheckbox(panel, behHdr, -4, "autoThank",
@@ -2299,15 +2354,17 @@ BuildOptionsPanel = function()
 
     local cbTram = MakeCheckbox(panel, expHdr, -4, "enableTram",
         "Enable Deeprun Tram (Beta)", "Experimental support for tracking the Deeprun Tram. Timings may vary.")
+    local cbSegInput = MakeCheckbox(panel, cbTram, nil, "segmentInput",
+        "Segment calibration (dev)", "Show 4-segment calibration bar for dual lifts instead of the top/bottom click UI. For measuring individual phase durations.")
 
     local cfLink = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    cfLink:SetPoint("TOPLEFT", cbTram, "BOTTOMLEFT", 4, -8)
+    cfLink:SetPoint("TOPLEFT", cbSegInput, "BOTTOMLEFT", 4, -8)
     cfLink:SetText("Feedback: |cff00ccffwww.curseforge.com/wow/addons/aldor-tax|r")
 
     panel:SetScript("OnShow", function()
-        cbParty:Refresh(); cbChannel:Refresh(); cbDebug:Refresh()
+        cbParty:Refresh(); cbChannel:Refresh(); cbDebug:Refresh(); cbVerbose:Refresh()
         cbThank:Refresh(); cbAlways:Refresh(); cbCompact:Refresh()
-        cbTram:Refresh()
+        cbTram:Refresh(); cbSegInput:Refresh()
     end)
 
     if Settings and Settings.RegisterCanvasLayoutCategory then

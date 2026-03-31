@@ -17,3 +17,5 @@ TESTING.md
 tasks.md
 bug.md
 GEMINI.md
+.venv/
+*.py
