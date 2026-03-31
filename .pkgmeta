@@ -8,3 +8,5 @@ ignore:
   - "*.zip"
   - .claude
   - TESTING.md
+  - README.md
+  - "*.png"
