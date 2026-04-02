@@ -48,6 +48,7 @@ local LIFTS = {
         waitAtTop    = 6.0,
         waitAtBottom = 4.7,
         cycleTime    = 25.0,
+        epochOffset  = 20.0,   -- GetTime() % cycleTime at phase 0 (FALL start); confirmed cross-server
         mapX         = 0.4169,
         mapY         = 0.3860,
         mapScale     = 1200,   -- approximate zone width in yards
@@ -101,9 +102,10 @@ local LIFTS = {
         mapY         = 0.2407,
         mapScale     = 1000,
         nearYards    = 60,
+        coordZone    = "Thousand Needles",
         zones        = { ["Thousand Needles"] = true, ["The Barrens"] = true },
         nearSubzones = { ["The Great Lift"] = true, ["Freewind Post"] = true },
-        deathZones   = { ["Thousand Needles"] = true, ["The Barrens"] = true },
+        deathZones   = { ["Thousand Needles"] = true },
         dualLift     = true,   -- two complementary platforms, offset by half a cycle
         eastX        = 0.3222, eastY = 0.2407,  -- east platform coords
         westX        = 0.3169, westY = 0.2381,  -- west platform coords
@@ -112,6 +114,32 @@ local LIFTS = {
             { r = 0.22, g = 0.35, b = 0.55 },
             { r = 0.60, g = 0.50, b = 0.18 },
             { r = 0.20, g = 0.48, b = 0.28 },
+        },
+    },
+    tblift = {
+        id           = "tblift",
+        displayName  = "TB Lift",
+        fallTime     = 9.65,     -- placeholder, needs calibration
+        riseTime     = 9.70,     -- placeholder
+        waitAtTop    = 5.20,     -- placeholder
+        waitAtBottom = 5.25,     -- placeholder
+        cycleTime    = 29.80,    -- placeholder
+        mapX         = 0.318, mapY = 0.626,
+        mapScale     = 1000,
+        nearYards    = 80,
+        coordZone    = "Thunder Bluff",
+        zones        = { ["Thunder Bluff"] = true, ["Mulgore"] = true },
+        nearSubzones = { ["Thunder Bluff"] = true },
+        deathZones   = { ["Thunder Bluff"] = true, ["Mulgore"] = true },
+        dualLift     = true,
+        dualOffset   = 8.0,     -- left is 8s behind right (viewed from top)
+        barLabel1    = "Left",
+        barLabel2    = "Right",
+        segColors    = {
+            { r = 0.65, g = 0.35, b = 0.15 },
+            { r = 0.30, g = 0.35, b = 0.60 },
+            { r = 0.70, g = 0.55, b = 0.12 },
+            { r = 0.15, g = 0.55, b = 0.35 },
         },
     },
 }
@@ -131,7 +159,7 @@ local APPROACH_WARNING_TIME = 10.0
 local CLICK_REACTION_TIME   = 0.2
 
 local ADDON_PREFIX          = "ALDORTAX"
-local MSG_VERSION           = 4
+local MSG_VERSION           = 5
 local SYNC_CHANNEL          = "AldorTaxSync"
 local SOFT_BLOCK_THRESHOLD  = 3
 local HARD_BLOCK_THRESHOLD  = 6
@@ -144,6 +172,7 @@ local function InitLiftState(id)
     liftState[id] = {
         lastSync          = 0,
         lastSyncSource    = nil,
+        syncOrigin        = nil,   -- "C" = calibrated first-hand, "R" = relayed
         lastAutoBroadcast = 0,
         lastSayTime       = 0,
         isNearLift        = nil,
@@ -157,6 +186,7 @@ local activeLiftID = nil   -- which lift the player is currently near
 -- ─── Shared state ────────────────────────────────────────────────────────────
 
 local realTimeOffset   = nil
+local serverTimeOffset = nil   -- GetServerTime() - GetTime(), calibrated once at login
 local syncChanNum      = 0
 local AUTO_BROADCAST_INTERVAL = 45
 local lastProximityCheck = 0
@@ -171,7 +201,9 @@ local settings = {
     segmentInput = false,
     autoThank    = true,
     alwaysShowUI = false,
+    alwaysCompact = false,
     enableTram = false,
+    acceptSelfSync = false,
 }
 
 local BuildOptionsPanel   -- forward declaration
@@ -204,6 +236,7 @@ do
         local t = time()
         if t > prev then
             realTimeOffset = t - GetTime()
+            serverTimeOffset = GetServerTime() - GetTime()
             self:SetScript("OnUpdate", nil)
             -- Restore saved syncs for all lifts
             if AldorTaxDB and AldorTaxDB.lifts then
@@ -224,6 +257,11 @@ local function GetRealTime()
     return realTimeOffset and (GetTime() + realTimeOffset) or time()
 end
 
+-- Smooth absolute time: GetTime() precision + GetServerTime() epoch
+local function GetAbsoluteTime()
+    return serverTimeOffset and (GetTime() + serverTimeOffset) or GetServerTime()
+end
+
 -- ─── Lift detection ─────────────────────────────────────────────────────────
 
 local function GetPlayerMapPos()
@@ -238,6 +276,8 @@ local function GetPlayerMapPos()
 end
 
 local function CheckNearLiftCoords(def)
+    -- Skip coordinate check if we're in the wrong zone (map coords won't match)
+    if def.coordZone and def.coordZone ~= GetZoneText() then return false end
     local px, py = GetPlayerMapPos()
     if not px then return nil end
     local nearFrac = def.nearYards / def.mapScale
@@ -273,7 +313,7 @@ local function DetectActiveLift()
         if def.zones[zone] then
             if id == "deepruntram" and not settings.enableTram then
                 -- Skip tram if not enabled in experimental settings
-            else
+            elseif CheckNearLift(def) or CheckApproachLift(def) then
                 return id
             end
         end
@@ -293,6 +333,8 @@ local function SaveSync(liftID, sourceName, sourceRealm, realTime)
     dbLift.lastSyncRealTime = realNow
     st.lastSyncSource = sourceName and { name = sourceName, realm = sourceRealm or "" } or nil
     dbLift.lastSyncSource = st.lastSyncSource
+    -- Local calibrations (no source) are first-hand; keep existing origin for remote syncs
+    if not sourceName then st.syncOrigin = "C" end
 end
 
 -- Log how much a local calibration click shifts the predicted phase.
@@ -308,20 +350,39 @@ local function LogSyncCorrection(liftID, newSyncTime)
     local half = def.cycleTime / 2
     if correction > half then correction = correction - def.cycleTime end
     if correction < -half then correction = correction + def.cycleTime end
-    -- Also log the epoch offset: if lifts are epoch-anchored,
-    -- newSyncTime % cycleTime should be constant across all syncs.
-    local epochOffset = newSyncTime % def.cycleTime
+    -- Log epoch offset in absolute (server) time so it's comparable across reboots
+    local absSync = newSyncTime + (serverTimeOffset or 0)
+    local epochOffset = absSync % def.cycleTime
     if not AldorTaxDB.syncLog then AldorTaxDB.syncLog = {} end
     table.insert(AldorTaxDB.syncLog, string.format(
         "%s|%s|CORRECTION|%.3f|%.3f|%.3f",
-        date("%Y-%m-%d %H:%M:%S"), liftID, GetTime(), correction, epochOffset))
-    Log(string.format("AldorTax: sync correction: %+.3fs (epoch offset: %.3f)", correction, epochOffset))
+        date("%Y-%m-%d %H:%M:%S"), liftID, GetServerTime(), correction, epochOffset))
+    Log(string.format("AldorTax: sync correction: %+.3fs (server epoch offset: %.3f)", correction, epochOffset))
+end
+
+local function ApplyEpochAnchor(id)
+    local def = LIFTS[id]
+    if not def or not def.epochOffset then return end
+    local st = liftState[id]
+    if not st then return end
+    local absNow = GetAbsoluteTime()
+    st.lastSync = GetTime() - ((absNow - def.epochOffset) % def.cycleTime)
+    st.lastSyncSource = nil
+    Log(string.format("AldorTax: %s auto-synced via epoch anchor (abs=%.1f)", def.displayName, absNow))
 end
 
 local function RestoreSync()
+    -- Epoch-anchored lifts: always apply (no persistence needed)
+    for id, def in pairs(LIFTS) do
+        if def.epochOffset then
+            ApplyEpochAnchor(id)
+        end
+    end
+    -- Persisted syncs for non-anchored lifts
     if not AldorTaxDB or not AldorTaxDB.lifts or not realTimeOffset then return end
     for id, dbLift in pairs(AldorTaxDB.lifts) do
-        if dbLift.lastSyncRealTime and liftState[id] then
+        local def = LIFTS[id]
+        if dbLift.lastSyncRealTime and liftState[id] and not (def and def.epochOffset) then
             local elapsed = GetRealTime() - dbLift.lastSyncRealTime
             liftState[id].lastSync = GetTime() - elapsed
             liftState[id].lastSyncSource = nil
@@ -421,8 +482,17 @@ local lastNoChannelWarn = 0
 
 local function SendMsg(msg)
     local sent = false
-    if settings.syncChannel and syncChanNum > 0 then
-        if RawSend(msg, "CHANNEL", syncChanNum) then sent = true end
+    if settings.syncChannel then
+        -- Re-resolve channel number every send; WoW can renumber channels
+        local n = GetChannelName(SYNC_CHANNEL)
+        if n and n > 0 then
+            syncChanNum = n
+            if RawSend(msg, "CHANNEL", n) then sent = true end
+        elseif syncChanNum > 0 then
+            -- Channel lost; attempt rejoin
+            syncChanNum = 0
+            pcall(JoinChannelByName, SYNC_CHANNEL)
+        end
     end
     if settings.syncParty then
         if UnitInRaid("player") then
@@ -462,9 +532,17 @@ local function BroadcastSync(liftID, realTime)
                   and AldorTaxDB.lifts[liftID].lastSyncRealTime)
               or GetRealTime()
     local phase = rt % def.cycleTime
-    SendMsg(string.format("S|%d|%s|%.3f|%s|%s|%.3f|%.3f|%.3f|%.3f",
+    -- origin: "C" if we calibrated this ourselves, "R" if relaying someone else's sync
+    local origin = (realTime or not st.lastSyncSource) and "C" or "R"
+    -- Server-time phase: shared ground truth across all clients regardless of local clock
+    local absRT = realTime and (realTime - realTimeOffset + (serverTimeOffset or 0))
+                  or GetAbsoluteTime()
+    local srvPhase = absRT % def.cycleTime
+    -- v5: S|ver|liftID|phase|name|realm|fall|bottom|rise|top|origin|srvPhase
+    -- phase (field 3) kept for v3/v4 compat; v5 receivers prefer srvPhase (field 11)
+    SendMsg(string.format("S|%d|%s|%.3f|%s|%s|%.3f|%.3f|%.3f|%.3f|%s|%.3f",
         MSG_VERSION, liftID, phase, name, realm,
-        def.fallTime, def.waitAtBottom, def.riseTime, def.waitAtTop))
+        def.fallTime, def.waitAtBottom, def.riseTime, def.waitAtTop, origin, srvPhase))
 end
 
 local function BroadcastDied(liftID)
@@ -475,11 +553,13 @@ local function BroadcastDied(liftID)
     if not st.lastSyncSource then return end
     local def = LIFTS[liftID]
     local phase = dbLift.lastSyncRealTime % def.cycleTime
-    SendMsg(string.format("D|%d|%s|%.3f|%s|%s",
-        MSG_VERSION, liftID, phase, st.lastSyncSource.name, st.lastSyncSource.realm))
+    -- v5: D|ver|liftID|phase|name|realm|origin
+    local origin = st.syncOrigin or "C"
+    SendMsg(string.format("D|%d|%s|%.3f|%s|%s|%s",
+        MSG_VERSION, liftID, phase, st.lastSyncSource.name, st.lastSyncSource.realm, origin))
 end
 
-local function ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, top)
+local function ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, top, srvPhase)
     if not realTimeOffset then return end
     local def = LIFTS[liftID]
     if not def then return end
@@ -487,14 +567,21 @@ local function ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, t
     local cycle_s = (fall and bottom and rise and top)
                     and (fall + bottom + rise + top)
                     or  def.cycleTime
-    local nowReal = GetRealTime()
-    local elapsedInCycle = (nowReal % cycle_s - phase + cycle_s) % cycle_s
+    -- Prefer server-time phase if available (v5); fall back to local-time phase (v3/v4)
+    local elapsedInCycle
+    if srvPhase and serverTimeOffset then
+        local nowAbs = GetAbsoluteTime()
+        elapsedInCycle = (nowAbs % cycle_s - srvPhase + cycle_s) % cycle_s
+    else
+        local nowReal = GetRealTime()
+        elapsedInCycle = (nowReal % cycle_s - phase + cycle_s) % cycle_s
+    end
     st.lastSync       = GetTime() - elapsedInCycle
     st.lastSyncSource = { name = name, realm = realm }
     if AldorTaxDB then
         if not AldorTaxDB.lifts then AldorTaxDB.lifts = {} end
         if not AldorTaxDB.lifts[liftID] then AldorTaxDB.lifts[liftID] = {} end
-        AldorTaxDB.lifts[liftID].lastSyncRealTime = nowReal - elapsedInCycle
+        AldorTaxDB.lifts[liftID].lastSyncRealTime = GetRealTime() - elapsedInCycle
         AldorTaxDB.lifts[liftID].lastSyncSource   = st.lastSyncSource
     end
 end
@@ -512,7 +599,7 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
         return
     end
 
-    if isSelf then return end
+    if isSelf and not settings.acceptSelfSync then return end
 
     Log(string.format("|cffffff00AldorTax RECV [%s] from %s: %s|r", chatType, tostring(sender), tostring(message)))
     local parts = {}
@@ -524,19 +611,22 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
         return
     end
 
+    -- v5: S|ver|liftID|phase|name|realm|fall|bottom|rise|top|origin|srvPhase
     -- v4: S|ver|liftID|phase|name|realm|fall|bottom|rise|top
     -- v3: S|ver|phase|name|realm|fall|bottom|rise|top  (assumed aldor)
     if msgType == "S" then
-        local liftID, phase, name, realm, fall, bottom, rise, top
+        local liftID, phase, name, realm, fall, bottom, rise, top, origin, srvPhase
         if ver >= 4 and #parts >= 5 then
-            liftID = parts[2]
-            phase  = tonumber(parts[3])
-            name   = parts[4]
-            realm  = parts[5]
-            fall   = tonumber(parts[6])
-            bottom = tonumber(parts[7])
-            rise   = tonumber(parts[8])
-            top    = tonumber(parts[9])
+            liftID   = parts[2]
+            phase    = tonumber(parts[3])
+            name     = parts[4]
+            realm    = parts[5]
+            fall     = tonumber(parts[6])
+            bottom   = tonumber(parts[7])
+            rise     = tonumber(parts[8])
+            top      = tonumber(parts[9])
+            origin   = parts[10] or "C"   -- v4 has no origin field; assume calibrated
+            srvPhase = tonumber(parts[11]) -- v5 only; nil for v4
         elseif ver >= 3 and #parts >= 4 then
             liftID = "aldor"
             phase  = tonumber(parts[2])
@@ -546,6 +636,7 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
             bottom = tonumber(parts[6])
             rise   = tonumber(parts[7])
             top    = tonumber(parts[8])
+            origin = "C"
         else
             return
         end
@@ -555,12 +646,15 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
             Log(string.format("|cffff6600AldorTax: Ignored sync from soft-blocked %s-%s|r", name, realm))
             return
         end
-        ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, top)
+        ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, top, srvPhase)
+        local st = liftState[liftID]
+        if st then st.syncOrigin = origin end
+        local originLabel = origin == "R" and " (relayed)" or ""
         if fall then
-            Log(string.format("|cff00ff00AldorTax: %s sync from %s (%.2f+%.2f+%.2f+%.2f=%.2fs)|r",
-                LIFTS[liftID].displayName, name, fall, bottom, rise, top, fall + bottom + rise + top))
+            Log(string.format("|cff00ff00AldorTax: %s sync from %s%s (%.2f+%.2f+%.2f+%.2f=%.2fs)|r",
+                LIFTS[liftID].displayName, name, originLabel, fall, bottom, rise, top, fall + bottom + rise + top))
         else
-            Log(string.format("|cff00ff00AldorTax: %s sync from %s-%s|r", LIFTS[liftID].displayName, name, realm))
+            Log(string.format("|cff00ff00AldorTax: %s sync from %s-%s%s|r", LIFTS[liftID].displayName, name, realm, originLabel))
         end
 
     elseif msgType == "D" then
@@ -605,6 +699,7 @@ logicFrame:RegisterEvent("ZONE_CHANGED")
 logicFrame:RegisterEvent("ZONE_CHANGED_INDOORS")
 logicFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 logicFrame:RegisterEvent("PLAYER_DEAD")
+logicFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 logicFrame:RegisterEvent("CHAT_MSG_TEXT_EMOTE")
 logicFrame:RegisterEvent("CHAT_MSG_SAY")
 
@@ -639,16 +734,26 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     elseif event == "CHAT_MSG_ADDON" then
         HandleAddonMessage(arg1, arg2, arg3, arg4)
 
+    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        local _, subEvent = CombatLogGetCurrentEventInfo()
+        if subEvent == "ENVIRONMENTAL_DAMAGE" then
+            local _, _, _, _, _, _, _, _, _, _, _, envType = CombatLogGetCurrentEventInfo()
+            if envType == "Falling" then
+                logicFrame.lastFallDamage = GetTime()
+            end
+        end
+
     elseif event == "PLAYER_DEAD" then
-        local zone = GetZoneText()
-        for id, def in pairs(LIFTS) do
-            if def.deathZones and def.deathZones[zone] then
-                BroadcastDied(id)
-                liftState[id].lastSync       = 0
-                liftState[id].lastSyncSource = nil
+        if activeLiftID then
+            local isFallDeath = logicFrame.lastFallDamage and (GetTime() - logicFrame.lastFallDamage) < 3
+            if isFallDeath then
+                BroadcastDied(activeLiftID)
+                liftState[activeLiftID].lastSync       = 0
+                liftState[activeLiftID].lastSyncSource = nil
                 warnFrame:Hide()
-                Log("|cffff0000AldorTax: Death detected — sync cleared and reported.|r")
-                break
+                Log("|cffff0000AldorTax: Fall death detected — sync cleared and reported.|r")
+            else
+                Log("|cffffcc00AldorTax: Non-fall death near lift — sync preserved.|r")
             end
         end
 
@@ -794,7 +899,8 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
     end
 
     -- Auto-broadcast
-    local hasRecipient = (settings.syncChannel and syncChanNum > 0)
+    local chanNum = settings.syncChannel and GetChannelName(SYNC_CHANNEL) or 0
+    local hasRecipient = (chanNum and chanNum > 0)
         or (settings.syncParty and (UnitInRaid("player") or (GetNumGroupMembers and GetNumGroupMembers() > 0)))
     if st.lastSync > 0 and hasRecipient then
         local now = GetTime()
@@ -982,7 +1088,7 @@ BuildSyncUI = function()
             table.insert(AldorTaxDB.syncLog, string.format(
                 "%s|%s|%s|%.3f|%.3f",
                 date("%Y-%m-%d %H:%M:%S"), activeLiftID,
-                SEG_NAMES[i], GetTime(), phaseStart))
+                SEG_NAMES[i], GetServerTime(), phaseStart))
             Log(string.format("|cff00ff00AldorTax: %s synced at %s|r", def.displayName, SEG_NAMES[i]))
         end)
     end
@@ -1165,17 +1271,19 @@ BuildSyncUI = function()
         if not activeLiftID then return end
         local def = LIFTS[activeLiftID]
         local st  = liftState[activeLiftID]
+        local offset = def.dualOffset or def.cycleTime / 2
+        local barLabel = isPrimary and (def.barLabel1 or "East") or (def.barLabel2 or "West")
         local phaseName, phaseStart
         if clickFrac >= 0.5 then
-            phaseName  = isPrimary and "TOP" or "TOP (West)"
+            phaseName  = "TOP (" .. barLabel .. ")"
             phaseStart = def.fallTime + def.waitAtBottom + def.riseTime
         else
-            phaseName  = isPrimary and "BOTTOM" or "BOTTOM (West)"
+            phaseName  = "BOTTOM (" .. barLabel .. ")"
             phaseStart = def.fallTime
         end
-        -- West lift is offset by half a cycle; convert to East-relative phase
-        if not isPrimary and def.dualLift then
-            phaseStart = (phaseStart + def.cycleTime / 2) % def.cycleTime
+        -- Secondary bar is offset from primary; convert to primary phase
+        if not isPrimary then
+            phaseStart = (phaseStart + offset) % def.cycleTime
         end
         local now = GetTime() - CLICK_REACTION_TIME
         LogSyncCorrection(activeLiftID, now - phaseStart)
@@ -1188,10 +1296,9 @@ BuildSyncUI = function()
         table.insert(AldorTaxDB.syncLog, string.format(
             "%s|%s|%s|%.3f|%.3f",
             date("%Y-%m-%d %H:%M:%S"), activeLiftID,
-            phaseName, GetTime(), phaseStart))
-        local label = phaseName == "TOP" and "arrived at top" or "arrived at bottom"
+            phaseName, GetServerTime(), phaseStart))
         Log(string.format("SYNC %s %s t=%.3f",
-            def.displayName, label, GetTime()))
+            def.displayName, phaseName, GetTime()))
     end
 
     local vbar1 = MakeVBar(dualContainer, "East", true)
@@ -1448,14 +1555,17 @@ BuildSyncUI = function()
                        string.format("AldorTax Tram: South departs %s in %02.0fs", nameB, t)
             end
         elseif def.dualLift then
-            local ttfEast = def.cycleTime - phase
-            local phase2 = (phase + def.cycleTime / 2) % def.cycleTime
-            local ttfWest = def.cycleTime - phase2
+            local offset = def.dualOffset or def.cycleTime / 2
+            local ttfPrimary = def.cycleTime - phase
+            local phase2 = (phase + offset) % def.cycleTime
+            local ttfSecondary = def.cycleTime - phase2
+            local platName1 = def.barLabel1 or "East"
+            local platName2 = def.barLabel2 or "West"
             local platName, ttf
-            if ttfEast <= ttfWest then
-                platName, ttf = "East", ttfEast
+            if ttfPrimary <= ttfSecondary then
+                platName, ttf = platName1, ttfPrimary
             else
-                platName, ttf = "West", ttfWest
+                platName, ttf = platName2, ttfSecondary
             end
             return string.format("AldorTax: %s lift going down in: %.1f seconds", platName, ttf)
         else
@@ -1743,6 +1853,9 @@ BuildSyncUI = function()
         isTram = def.horizontal and true or false
         if isDual then
             title:SetText(def.displayName .. "  |cff888888click segment to sync|r")
+            -- Update bar labels for this lift type
+            vbar1.label:SetText(def.barLabel1 or "East")
+            vbar2.label:SetText(def.barLabel2 or "West")
         else
             title:SetText(def.displayName .. "  |cff888888click phase to sync|r")
         end
@@ -2077,13 +2190,9 @@ BuildSyncUI = function()
                 return
             end
 
+            local offset = def.dualOffset or def.cycleTime / 2
             local phase1 = (GetTime() - st.lastSync) % def.cycleTime
-            local phase2 = (phase1 + def.cycleTime / 2) % def.cycleTime
-            local h1 = GetLiftHeight(phase1, def)
-            local h2 = GetLiftHeight(phase2, def)
-            local r1, g1, b1 = GetPhaseColor(phase1, def)
-            local r2, g2, b2 = GetPhaseColor(phase2, def)
-
+            local phase2 = (phase1 + offset) % def.cycleTime
             -- Helper: get phase name from cycle phase
             local function PhaseName(ph)
                 if ph < def.fallTime then return "FALL"
@@ -2091,6 +2200,11 @@ BuildSyncUI = function()
                 elseif ph < def.fallTime + def.waitAtBottom + def.riseTime then return "RISE"
                 else return "TOP" end
             end
+
+            local h1 = GetLiftHeight(phase1, def)
+            local h2 = GetLiftHeight(phase2, def)
+            local r1, g1, b1 = GetPhaseColor(phase1, def)
+            local r2, g2, b2 = GetPhaseColor(phase2, def)
 
             -- Primary bar: phase-colored cursor with glow
             vbar1.cursor:SetColorTexture(r1, g1, b1, 0.90)
@@ -2103,6 +2217,7 @@ BuildSyncUI = function()
             vbar1.phaseLbl:SetTextColor(r1, g1, b1, 0.85)
             vbar1.phaseLbl:ClearAllPoints()
             vbar1.phaseLbl:SetPoint("LEFT", vbar1.cursor, "RIGHT", 4, 0)
+            vbar1.timeLabel:SetText(string.format("%.1fs", def.cycleTime - phase1))
 
             -- Secondary bar: dimmer phase-colored cursor
             vbar2.cursor:SetColorTexture(r2, g2, b2, 0.60)
@@ -2115,11 +2230,7 @@ BuildSyncUI = function()
             vbar2.phaseLbl:SetTextColor(r2, g2, b2, 0.55)
             vbar2.phaseLbl:ClearAllPoints()
             vbar2.phaseLbl:SetPoint("RIGHT", vbar2.cursor, "LEFT", -4, 0)
-
-            local ttd1 = def.cycleTime - phase1
-            local ttd2 = def.cycleTime - phase2
-            vbar1.timeLabel:SetText(string.format("%.1fs", ttd1))
-            vbar2.timeLabel:SetText(string.format("%.1fs", ttd2))
+            vbar2.timeLabel:SetText(string.format("%.1fs", def.cycleTime - phase2))
 
             if st.lastSyncSource then
                 sourceLabel:SetText(string.format("|cff88ff88received from %s|r", st.lastSyncSource.name))
@@ -2166,7 +2277,8 @@ BuildSyncUI = function()
             local phase = (GetTime() - st.lastSync) % def.cycleTime
             local showSay = phase >= topStart
             if def.dualLift then
-                local phase2 = (phase + def.cycleTime / 2) % def.cycleTime
+                local offset = def.dualOffset or def.cycleTime / 2
+                local phase2 = (phase + offset) % def.cycleTime
                 showSay = showSay or phase2 >= topStart
             end
             if showSay then sayBtn:Show() else sayBtn:Hide() end
