@@ -43,6 +43,7 @@ local LIFTS = {
     aldor = {
         id           = "aldor",
         displayName  = "Aldor Lift",
+        settingsKey  = "enableAldor",
         fallTime     = 6.5,
         riseTime     = 7.8,
         waitAtTop    = 6.0,
@@ -67,6 +68,7 @@ local LIFTS = {
     deepruntram = {
         id           = "deepruntram",
         displayName  = "Deeprun Tram",
+        settingsKey  = "enableTram",
         fallTime     = 58.5,     -- travel IF -> SW
         waitAtBottom = 13.0,     -- dwell at SW
         riseTime     = 58.5,     -- travel SW -> IF
@@ -93,6 +95,7 @@ local LIFTS = {
     greatlift = {
         id           = "greatlift",
         displayName  = "Great Lift",
+        settingsKey  = "enableGreatLift",
         fallTime     = 9.65,
         riseTime     = 9.70,
         waitAtTop    = 5.20,
@@ -119,11 +122,12 @@ local LIFTS = {
     tblift = {
         id           = "tblift",
         displayName  = "TB Lift",
-        fallTime     = 9.65,     -- placeholder, needs calibration
-        riseTime     = 9.70,     -- placeholder
-        waitAtTop    = 5.20,     -- placeholder
-        waitAtBottom = 5.25,     -- placeholder
-        cycleTime    = 29.80,    -- placeholder
+        settingsKey  = "enableTBLift",
+        fallTime     = 9.65,
+        riseTime     = 9.70,
+        waitAtTop    = 5.20,
+        waitAtBottom = 5.25,
+        cycleTime    = 29.80,
         mapX         = 0.318, mapY = 0.626,
         mapScale     = 1000,
         nearYards    = 80,
@@ -189,6 +193,8 @@ local realTimeOffset   = nil
 local serverTimeOffset = nil   -- GetServerTime() - GetTime(), calibrated once at login
 local syncChanNum      = 0
 local AUTO_BROADCAST_INTERVAL = 45
+local ZONE_SEND_COOLDOWN      = 5     -- seconds after zoning before we send addon messages
+local zonedInAt               = 0     -- GetTime() when we last zoned into a lift area
 local lastProximityCheck = 0
 local PROXIMITY_CHECK_INTERVAL = 1.0
 
@@ -202,7 +208,10 @@ local settings = {
     autoThank    = true,
     alwaysShowUI = false,
     alwaysCompact = false,
+    enableAldor = true,
+    enableGreatLift = true,
     enableTram = false,
+    enableTBLift = false,
     acceptSelfSync = false,
 }
 
@@ -228,15 +237,21 @@ local function Log(msg)
 end
 
 -- ─── Real-time calibration ──────────────────────────────────────────────────
+-- Calibrate by waiting for GetServerTime() to tick.  At the tick boundary the
+-- true server time is very close to the new integer value, so the offset is
+-- accurate to within one frame (~16 ms) rather than the ~1 s error you get
+-- from sampling GetServerTime() at an arbitrary moment.
 
 do
-    local prev = time()
-    local f    = CreateFrame("Frame")
+    local prevSrv = GetServerTime()
+    local f       = CreateFrame("Frame")
     f:SetScript("OnUpdate", function(self)
-        local t = time()
-        if t > prev then
-            realTimeOffset = t - GetTime()
-            serverTimeOffset = GetServerTime() - GetTime()
+        local srv = GetServerTime()
+        -- Wait for GetServerTime() tick — gives sub-frame server-time precision
+        if srv > prevSrv then
+            serverTimeOffset = srv - GetTime()
+            -- ±1 s is fine for display-only local time
+            realTimeOffset = time() - GetTime()
             self:SetScript("OnUpdate", nil)
             -- Restore saved syncs for all lifts
             if AldorTaxDB and AldorTaxDB.lifts then
@@ -249,7 +264,7 @@ do
                 end
             end
         end
-        prev = t
+        prevSrv = srv
     end)
 end
 
@@ -311,8 +326,8 @@ local function DetectActiveLift()
     local zone = GetZoneText()
     for id, def in pairs(LIFTS) do
         if def.zones[zone] then
-            if id == "deepruntram" and not settings.enableTram then
-                -- Skip tram if not enabled in experimental settings
+            if def.settingsKey and not settings[def.settingsKey] then
+                -- Skip lifts disabled in settings
             elseif CheckNearLift(def) or CheckApproachLift(def) then
                 return id
             end
@@ -467,7 +482,11 @@ end
 
 local function RawSend(msg, chatType, target)
     local ok, err
-    if C_ChatInfo then
+    if ChatThrottleLib then
+        -- Use CTL: time-sensitive sync data goes as ALERT priority
+        ok, err = pcall(ChatThrottleLib.SendAddonMessage, ChatThrottleLib,
+                        "ALERT", ADDON_PREFIX, msg, chatType, target)
+    elseif C_ChatInfo then
         ok, err = pcall(C_ChatInfo.SendAddonMessage, ADDON_PREFIX, msg, chatType, target)
     else
         ok, err = pcall(SendAddonMessage, ADDON_PREFIX, msg, chatType, target)
@@ -522,6 +541,7 @@ local function SendTestWhisper()
 end
 
 local function BroadcastSync(liftID, realTime)
+    if GetTime() - zonedInAt < ZONE_SEND_COOLDOWN then return end
     local def = LIFTS[liftID]
     if not def then return end
     local st  = liftState[liftID]
@@ -567,13 +587,17 @@ local function ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, t
     local cycle_s = (fall and bottom and rise and top)
                     and (fall + bottom + rise + top)
                     or  def.cycleTime
+    -- Compensate for network latency: the message was current when it left
+    -- the sender's client, but took ~latency ms to reach us via the server
+    local _, _, _, latencyWorld = GetNetStats()
+    local netDelay = (latencyWorld or 0) / 1000  -- ms → seconds
     -- Prefer server-time phase if available (v5); fall back to local-time phase (v3/v4)
     local elapsedInCycle
     if srvPhase and serverTimeOffset then
-        local nowAbs = GetAbsoluteTime()
+        local nowAbs = GetAbsoluteTime() - netDelay
         elapsedInCycle = (nowAbs % cycle_s - srvPhase + cycle_s) % cycle_s
     else
-        local nowReal = GetRealTime()
+        local nowReal = GetRealTime() - netDelay
         elapsedInCycle = (nowReal % cycle_s - phase + cycle_s) % cycle_s
     end
     st.lastSync       = GetTime() - elapsedInCycle
@@ -788,6 +812,9 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         local newLiftID = DetectActiveLift()
         if newLiftID then
             if newLiftID ~= activeLiftID then
+                if not activeLiftID then
+                    zonedInAt = GetTime()  -- entering a lift zone; delay sends for server rate-limiter
+                end
                 activeLiftID = newLiftID
                 if not syncUI then syncUI = BuildSyncUI() end
                 syncUI.ReconfigureLift(activeLiftID)
@@ -2460,13 +2487,24 @@ BuildOptionsPanel = function()
         end
     end)
 
+    local liftHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    liftHdr:SetPoint("TOPLEFT", cbCompact, "BOTTOMLEFT", 0, -24)
+    liftHdr:SetText("Lifts")
+
+    local cbAldor = MakeCheckbox(panel, liftHdr, -4, "enableAldor",
+        "Aldor Rise", "Track the Aldor Rise elevator in Shattrath City.")
+    local cbGreatLift = MakeCheckbox(panel, cbAldor, nil, "enableGreatLift",
+        "Great Lift", "Track the Great Lift between Barrens and Thousand Needles.")
+    local cbTram = MakeCheckbox(panel, cbGreatLift, nil, "enableTram",
+        "Deeprun Tram", "Track the Deeprun Tram between Ironforge and Stormwind.")
+    local cbTBLift = MakeCheckbox(panel, cbTram, nil, "enableTBLift",
+        "Thunder Bluff Lift", "Track the Thunder Bluff elevators.")
+
     local expHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    expHdr:SetPoint("TOPLEFT", cbCompact, "BOTTOMLEFT", 0, -24)
+    expHdr:SetPoint("TOPLEFT", cbTBLift, "BOTTOMLEFT", 0, -24)
     expHdr:SetText("Experimental")
 
-    local cbTram = MakeCheckbox(panel, expHdr, -4, "enableTram",
-        "Enable Deeprun Tram (Beta)", "Experimental support for tracking the Deeprun Tram. Timings may vary.")
-    local cbSegInput = MakeCheckbox(panel, cbTram, nil, "segmentInput",
+    local cbSegInput = MakeCheckbox(panel, expHdr, -4, "segmentInput",
         "Segment calibration (dev)", "Show 4-segment calibration bar for dual lifts instead of the top/bottom click UI. For measuring individual phase durations.")
 
     local cfLink = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -2476,7 +2514,8 @@ BuildOptionsPanel = function()
     panel:SetScript("OnShow", function()
         cbParty:Refresh(); cbChannel:Refresh(); cbDebug:Refresh(); cbVerbose:Refresh()
         cbThank:Refresh(); cbAlways:Refresh(); cbCompact:Refresh()
-        cbTram:Refresh(); cbSegInput:Refresh()
+        cbAldor:Refresh(); cbGreatLift:Refresh()
+        cbTram:Refresh(); cbTBLift:Refresh(); cbSegInput:Refresh()
     end)
 
     if Settings and Settings.RegisterCanvasLayoutCategory then
