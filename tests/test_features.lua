@@ -3,60 +3,8 @@
 
 package.path = package.path .. ";tests/?.lua"
 local MockAPI = require("wow_api_mock")
-
--- ─── Test harness ───────────────────────────────────────────────────────────
-
-local passed, failed, errors = 0, 0, {}
-
-local function assert_near(actual, expected, tolerance, label)
-    local diff = math.abs(actual - expected)
-    if diff <= tolerance then
-        passed = passed + 1
-    else
-        failed = failed + 1
-        local msg = string.format("FAIL: %s — expected %.4f ±%.4f, got %.4f (off by %.4f)",
-            label, expected, tolerance, actual, diff)
-        table.insert(errors, msg)
-        print(msg)
-    end
-end
-
-local function assert_true(value, label)
-    if value then
-        passed = passed + 1
-    else
-        failed = failed + 1
-        local msg = string.format("FAIL: %s — expected true, got %s", label, tostring(value))
-        table.insert(errors, msg)
-        print(msg)
-    end
-end
-
-local function assert_false(value, label)
-    if not value then
-        passed = passed + 1
-    else
-        failed = failed + 1
-        local msg = string.format("FAIL: %s — expected false/nil, got %s", label, tostring(value))
-        table.insert(errors, msg)
-        print(msg)
-    end
-end
-
-local function assert_eq(actual, expected, label)
-    if actual == expected then
-        passed = passed + 1
-    else
-        failed = failed + 1
-        local msg = string.format("FAIL: %s — expected %s, got %s", label, tostring(expected), tostring(actual))
-        table.insert(errors, msg)
-        print(msg)
-    end
-end
-
-local function section(name)
-    print(string.format("\n-- %s --", name))
-end
+local H = require("test_harness")
+local assert_true, assert_eq, section = H.assert_true, H.assert_eq, H.section
 
 -- ─── Test 1: ChatThrottleLib integration ────────────────────────────────────
 -- When ChatThrottleLib is present, RawSend should use it instead of
@@ -294,9 +242,4 @@ ChatThrottleLib = savedCTL
 
 -- ─── Results ────────────────────────────────────────────────────────────────
 
-print(string.format("\n-- Results: %d passed, %d failed --", passed, failed))
-if #errors > 0 then
-    print("\nFailures:")
-    for _, e in ipairs(errors) do print("  " .. e) end
-end
-os.exit(failed > 0 and 1 or 0)
+H.results()

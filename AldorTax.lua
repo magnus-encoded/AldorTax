@@ -352,6 +352,15 @@ local function SaveSync(liftID, sourceName, sourceRealm, realTime)
     if not sourceName then st.syncOrigin = "C" end
 end
 
+local SYNC_LOG_MAX = 200
+
+local function AppendSyncLog(entry)
+    if not AldorTaxDB then return end
+    if not AldorTaxDB.syncLog then AldorTaxDB.syncLog = {} end
+    table.insert(AldorTaxDB.syncLog, entry)
+    if #AldorTaxDB.syncLog > SYNC_LOG_MAX then table.remove(AldorTaxDB.syncLog, 1) end
+end
+
 -- Log how much a local calibration click shifts the predicted phase.
 -- Called just before st.lastSync is overwritten.
 local function LogSyncCorrection(liftID, newSyncTime)
@@ -368,8 +377,7 @@ local function LogSyncCorrection(liftID, newSyncTime)
     -- Log epoch offset in absolute (server) time so it's comparable across reboots
     local absSync = newSyncTime + (serverTimeOffset or 0)
     local epochOffset = absSync % def.cycleTime
-    if not AldorTaxDB.syncLog then AldorTaxDB.syncLog = {} end
-    table.insert(AldorTaxDB.syncLog, string.format(
+    AppendSyncLog(string.format(
         "%s|%s|CORRECTION|%.3f|%.3f|%.3f",
         date("%Y-%m-%d %H:%M:%S"), liftID, GetServerTime(), correction, epochOffset))
     Log(string.format("AldorTax: sync correction: %+.3fs (server epoch offset: %.3f)", correction, epochOffset))
@@ -960,8 +968,7 @@ local function PerformCalibrationClick(liftID, phaseStart, label)
     local rt = GetRealTime() - CLICK_REACTION_TIME - phaseStart
     SaveSync(liftID, nil, nil, rt)
     BroadcastSync(liftID, rt)
-    if not AldorTaxDB.syncLog then AldorTaxDB.syncLog = {} end
-    table.insert(AldorTaxDB.syncLog, string.format(
+    AppendSyncLog(string.format(
         "%s|%s|%s|%.3f|%.3f",
         date("%Y-%m-%d %H:%M:%S"), liftID, label, GetServerTime(), phaseStart))
     Log(string.format("|cff00ff00AldorTax: %s synced at %s|r", def.displayName, label))
