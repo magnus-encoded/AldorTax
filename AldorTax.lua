@@ -943,6 +943,30 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
     end
 end)
 
+-- ─── Calibration click helper ───────────────────────────────────────────────
+-- Shared logic for all click-to-sync interactions: segment bar, dual-lift
+-- top/bottom, tram station buttons, and tram travel-bar departure.
+-- phaseStart: cycle offset of the clicked phase transition (0 = FALL start)
+-- label:      human-readable description for the sync log entry
+
+local function PerformCalibrationClick(liftID, phaseStart, label)
+    local def = LIFTS[liftID]
+    local st  = liftState[liftID]
+    if not def or not st then return end
+    local now = GetTime() - CLICK_REACTION_TIME
+    LogSyncCorrection(liftID, now - phaseStart)
+    st.lastSync          = now - phaseStart
+    st.lastAutoBroadcast = GetTime()
+    local rt = GetRealTime() - CLICK_REACTION_TIME - phaseStart
+    SaveSync(liftID, nil, nil, rt)
+    BroadcastSync(liftID, rt)
+    if not AldorTaxDB.syncLog then AldorTaxDB.syncLog = {} end
+    table.insert(AldorTaxDB.syncLog, string.format(
+        "%s|%s|%s|%.3f|%.3f",
+        date("%Y-%m-%d %H:%M:%S"), liftID, label, GetServerTime(), phaseStart))
+    Log(string.format("|cff00ff00AldorTax: %s synced at %s|r", def.displayName, label))
+end
+
 -- ─── Sync UI ────────────────────────────────────────────────────────────────
 
 -- Returns 0.0 (bottom) to 1.0 (top) representing physical lift height at a
@@ -1100,23 +1124,9 @@ BuildSyncUI = function()
         segBtn:SetScript("OnClick", function()
             if not activeLiftID then return end
             local def = LIFTS[activeLiftID]
-            local st  = liftState[activeLiftID]
-            local now = GetTime() - CLICK_REACTION_TIME
             local starts = { [0] = 0, def.fallTime, def.fallTime + def.waitAtBottom,
                              def.fallTime + def.waitAtBottom + def.riseTime }
-            local phaseStart = starts[phaseIdx]
-            LogSyncCorrection(activeLiftID, now - phaseStart)
-            st.lastSync = now - phaseStart
-            st.lastAutoBroadcast = GetTime()
-            local rt = GetRealTime() - CLICK_REACTION_TIME - phaseStart
-            SaveSync(activeLiftID, nil, nil, rt)
-            BroadcastSync(activeLiftID, rt)
-            if not AldorTaxDB.syncLog then AldorTaxDB.syncLog = {} end
-            table.insert(AldorTaxDB.syncLog, string.format(
-                "%s|%s|%s|%.3f|%.3f",
-                date("%Y-%m-%d %H:%M:%S"), activeLiftID,
-                SEG_NAMES[i], GetServerTime(), phaseStart))
-            Log(string.format("|cff00ff00AldorTax: %s synced at %s|r", def.displayName, SEG_NAMES[i]))
+            PerformCalibrationClick(activeLiftID, starts[phaseIdx], SEG_NAMES[i])
         end)
     end
 
@@ -1297,7 +1307,6 @@ BuildSyncUI = function()
     OnBarClick = function(isPrimary, clickFrac)
         if not activeLiftID then return end
         local def = LIFTS[activeLiftID]
-        local st  = liftState[activeLiftID]
         local offset = def.dualOffset or def.cycleTime / 2
         local barLabel = isPrimary and (def.barLabel1 or "East") or (def.barLabel2 or "West")
         local phaseName, phaseStart
@@ -1312,20 +1321,7 @@ BuildSyncUI = function()
         if not isPrimary then
             phaseStart = (phaseStart + offset) % def.cycleTime
         end
-        local now = GetTime() - CLICK_REACTION_TIME
-        LogSyncCorrection(activeLiftID, now - phaseStart)
-        st.lastSync = now - phaseStart
-        st.lastAutoBroadcast = GetTime()
-        local rt = GetRealTime() - CLICK_REACTION_TIME - phaseStart
-        SaveSync(activeLiftID, nil, nil, rt)
-        BroadcastSync(activeLiftID, rt)
-        if not AldorTaxDB.syncLog then AldorTaxDB.syncLog = {} end
-        table.insert(AldorTaxDB.syncLog, string.format(
-            "%s|%s|%s|%.3f|%.3f",
-            date("%Y-%m-%d %H:%M:%S"), activeLiftID,
-            phaseName, GetServerTime(), phaseStart))
-        Log(string.format("SYNC %s %s t=%.3f",
-            def.displayName, phaseName, GetTime()))
+        PerformCalibrationClick(activeLiftID, phaseStart, phaseName)
     end
 
     local vbar1 = MakeVBar(dualContainer, "East", true)
@@ -1497,7 +1493,6 @@ BuildSyncUI = function()
         clickBtn:SetScript("OnClick", function(self)
             if not activeLiftID then return end
             local def = LIFTS[activeLiftID]
-            local st  = liftState[activeLiftID]
             local ds = getDepartStation()
             local phaseStart, phaseName
             if ds == "B" then
@@ -1512,15 +1507,7 @@ BuildSyncUI = function()
             if not isPrimary and def.dualLift then
                 phaseStart = (phaseStart + def.cycleTime / 2) % def.cycleTime
             end
-            local now = GetTime() - CLICK_REACTION_TIME
-            LogSyncCorrection(activeLiftID, now - phaseStart)
-            st.lastSync = now - phaseStart
-            st.lastAutoBroadcast = GetTime()
-            local rt = GetRealTime() - CLICK_REACTION_TIME - phaseStart
-            SaveSync(activeLiftID, nil, nil, rt)
-            BroadcastSync(activeLiftID, rt)
-            Log(string.format("|cff00ff00AldorTax: %s synced at %s%s|r",
-                def.displayName, phaseName, isPrimary and "" or " (2nd tram)"))
+            PerformCalibrationClick(activeLiftID, phaseStart, phaseName .. (isPrimary and "" or " (2nd tram)"))
         end)
 
         return {
@@ -1930,19 +1917,9 @@ BuildSyncUI = function()
                 hb.btnA:SetScript("OnClick", function()
                     if not activeLiftID then return end
                     local ld = LIFTS[activeLiftID]
-                    local st = liftState[activeLiftID]
                     local ps = atA
                     if not primary and ld.dualLift then ps = (ps + ld.cycleTime / 2) % ld.cycleTime end
-                    local now = GetTime() - CLICK_REACTION_TIME
-                    LogSyncCorrection(activeLiftID, now - ps)
-                    st.lastSync = now - ps
-                    st.lastAutoBroadcast = GetTime()
-                    local rt = GetRealTime() - CLICK_REACTION_TIME - ps
-                    SaveSync(activeLiftID, nil, nil, rt)
-                    BroadcastSync(activeLiftID, rt)
-                    -- departure context now derived from timer phase
-                    Log(string.format("|cff00ff00AldorTax: %s synced at %s%s|r",
-                        ld.displayName, nameA, primary and "" or " (2nd tram)"))
+                    PerformCalibrationClick(activeLiftID, ps, nameA .. (primary and "" or " (2nd tram)"))
                 end)
                 -- Configure station button B (right)
                 hb.btnB.label:SetText(nameB)
@@ -1957,19 +1934,9 @@ BuildSyncUI = function()
                 hb.btnB:SetScript("OnClick", function()
                     if not activeLiftID then return end
                     local ld = LIFTS[activeLiftID]
-                    local st = liftState[activeLiftID]
                     local ps = atB
                     if not primary and ld.dualLift then ps = (ps + ld.cycleTime / 2) % ld.cycleTime end
-                    local now = GetTime() - CLICK_REACTION_TIME
-                    LogSyncCorrection(activeLiftID, now - ps)
-                    st.lastSync = now - ps
-                    st.lastAutoBroadcast = GetTime()
-                    local rt = GetRealTime() - CLICK_REACTION_TIME - ps
-                    SaveSync(activeLiftID, nil, nil, rt)
-                    BroadcastSync(activeLiftID, rt)
-                    -- departure context now derived from timer phase
-                    Log(string.format("|cff00ff00AldorTax: %s synced at %s%s|r",
-                        ld.displayName, nameB, primary and "" or " (2nd tram)"))
+                    PerformCalibrationClick(activeLiftID, ps, nameB .. (primary and "" or " (2nd tram)"))
                 end)
             end
 
