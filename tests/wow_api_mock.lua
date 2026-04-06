@@ -4,6 +4,9 @@
 
 local MockAPI = {}
 
+-- Lua 5.3+ merged atan2 into atan; WoW uses Lua 5.1 which has math.atan2
+if not math.atan2 then math.atan2 = math.atan end
+
 -- ─── Clock state ────────────────────────────────────────────────────────────
 
 local _serverTime = 1775168000

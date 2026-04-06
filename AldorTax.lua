@@ -361,9 +361,107 @@ local function AppendSyncLog(entry)
     if #AldorTaxDB.syncLog > SYNC_LOG_MAX then table.remove(AldorTaxDB.syncLog, 1) end
 end
 
+-- ─── Timing diagnostics ────────────────────────────────────────────────────
+-- Compact per-lift timing samples for validating cycle time and segment lengths.
+-- Each sample: { serverTime, epochOffset, correction, label }
+-- Stored in AldorTaxDB.timing[liftID] and survives sync log rotation.
+
+local TIMING_SAMPLE_MAX = 500
+
+local function RecordTimingSample(liftID, serverTime, epochOffset, correction, label)
+    if not AldorTaxDB then return end
+    if not AldorTaxDB.timing then AldorTaxDB.timing = {} end
+    if not AldorTaxDB.timing[liftID] then AldorTaxDB.timing[liftID] = {} end
+    local t = AldorTaxDB.timing[liftID]
+    t[#t + 1] = { serverTime, epochOffset, correction, label }
+    if #t > TIMING_SAMPLE_MAX then table.remove(t, 1) end
+end
+
+-- Analyze timing samples for a lift. Returns a table with diagnostics:
+--   n, timeSpan, meanEpoch, stdEpoch, driftPerHour, impliedCycleError,
+--   segments = { [label] = { n, meanCorr, stdCorr } }
+local function AnalyzeTiming(liftID)
+    if not AldorTaxDB or not AldorTaxDB.timing then return nil end
+    local samples = AldorTaxDB.timing[liftID]
+    if not samples or #samples < 2 then return nil end
+    local def = LIFTS[liftID]
+    if not def then return nil end
+
+    local n = #samples
+    local cycle = def.cycleTime
+    local twoPi = 2 * math.pi
+
+    -- Circular mean of epoch offset (handles wrap at cycleTime)
+    local sumSin, sumCos = 0, 0
+    for i = 1, n do
+        local angle = samples[i][2] * twoPi / cycle
+        sumSin = sumSin + math.sin(angle)
+        sumCos = sumCos + math.cos(angle)
+    end
+    local meanAngle = math.atan2(sumSin / n, sumCos / n)
+    if meanAngle < 0 then meanAngle = meanAngle + twoPi end
+    local meanEpoch = meanAngle * cycle / twoPi
+
+    -- Circular standard deviation
+    local R = math.sqrt((sumSin / n) ^ 2 + (sumCos / n) ^ 2)
+    local stdEpoch = (R < 1) and math.sqrt(-2 * math.log(R)) * cycle / twoPi or 0
+
+    -- Drift detection: unwrap epoch offsets relative to meanEpoch, then
+    -- linear regression of unwrapped offset vs serverTime.
+    -- Unwrap: offset_i = ((raw - meanEpoch + half) % cycle) - half + meanEpoch
+    local half = cycle / 2
+    local sumT, sumY, sumTY, sumT2 = 0, 0, 0, 0
+    local t0 = samples[1][1]  -- reference time for numerical stability
+    for i = 1, n do
+        local t = samples[i][1] - t0
+        local raw = samples[i][2]
+        local unwrapped = ((raw - meanEpoch + half) % cycle) - half + meanEpoch
+        sumT  = sumT + t
+        sumY  = sumY + unwrapped
+        sumTY = sumTY + t * unwrapped
+        sumT2 = sumT2 + t * t
+    end
+    local denom = n * sumT2 - sumT * sumT
+    local driftPerSec = (denom ~= 0) and (n * sumTY - sumT * sumY) / denom or 0
+    local driftPerHour = driftPerSec * 3600
+    -- Drift per cycle = driftPerSec * cycleTime → implied true cycle = cycle + drift_per_cycle
+    local impliedCycleError = driftPerSec * cycle
+
+    -- Per-segment correction statistics
+    local segData = {}
+    for i = 1, n do
+        local corr = samples[i][3]
+        local label = samples[i][4]
+        if corr ~= 0 or label then  -- skip samples without a correction (first click)
+            local key = label or "?"
+            if not segData[key] then segData[key] = { n = 0, sum = 0, sumSq = 0 } end
+            local s = segData[key]
+            s.n = s.n + 1
+            s.sum = s.sum + corr
+            s.sumSq = s.sumSq + corr * corr
+        end
+    end
+    local segments = {}
+    for label, s in pairs(segData) do
+        local mean = s.sum / s.n
+        local variance = (s.n > 1) and (s.sumSq / s.n - mean * mean) or 0
+        segments[label] = { n = s.n, meanCorr = mean, stdCorr = math.sqrt(math.max(0, variance)) }
+    end
+
+    local timeSpan = samples[n][1] - samples[1][1]
+
+    return {
+        n = n, timeSpan = timeSpan,
+        meanEpoch = meanEpoch, stdEpoch = stdEpoch,
+        driftPerHour = driftPerHour, impliedCycleError = impliedCycleError,
+        segments = segments,
+    }
+end
+
 -- Log how much a local calibration click shifts the predicted phase.
 -- Called just before st.lastSync is overwritten.
-local function LogSyncCorrection(liftID, newSyncTime)
+-- label: segment name from the click (e.g. "FALL", "BOTTOM")
+local function LogSyncCorrection(liftID, newSyncTime, label)
     local st  = liftState[liftID]
     local def = LIFTS[liftID]
     if not st or not def or st.lastSync <= 0 then return end
@@ -380,6 +478,7 @@ local function LogSyncCorrection(liftID, newSyncTime)
     AppendSyncLog(string.format(
         "%s|%s|CORRECTION|%.3f|%.3f|%.3f",
         date("%Y-%m-%d %H:%M:%S"), liftID, GetServerTime(), correction, epochOffset))
+    RecordTimingSample(liftID, GetServerTime(), epochOffset, correction, label)
     Log(string.format("AldorTax: sync correction: %+.3fs (server epoch offset: %.3f)", correction, epochOffset))
 end
 
@@ -962,7 +1061,12 @@ local function PerformCalibrationClick(liftID, phaseStart, label)
     local st  = liftState[liftID]
     if not def or not st then return end
     local now = GetTime() - CLICK_REACTION_TIME
-    LogSyncCorrection(liftID, now - phaseStart)
+    LogSyncCorrection(liftID, now - phaseStart, label)
+    -- Record timing sample even on first click (LogSyncCorrection skips when lastSync=0)
+    if st.lastSync <= 0 then
+        local absSync = (now - phaseStart) + (serverTimeOffset or 0)
+        RecordTimingSample(liftID, GetServerTime(), absSync % def.cycleTime, 0, label)
+    end
     st.lastSync          = now - phaseStart
     st.lastAutoBroadcast = GetTime()
     local rt = GetRealTime() - CLICK_REACTION_TIME - phaseStart
@@ -2582,6 +2686,49 @@ SlashCmdList["ALDORTAX"] = function(msg)
         else
             print("|cffffff00  Nameplates: (none visible)|r")
         end
+    elseif msg:sub(1, 6) == "timing" then
+        local arg = msg:sub(8)
+        local liftID = (arg ~= "") and arg or (activeLiftID or "aldor")
+        local r = AnalyzeTiming(liftID)
+        if not r then
+            local count = AldorTaxDB and AldorTaxDB.timing and AldorTaxDB.timing[liftID]
+                          and #AldorTaxDB.timing[liftID] or 0
+            print(string.format("|cffffff00AldorTax timing [%s]: %d sample(s) — need at least 2.|r",
+                liftID, count))
+            return
+        end
+        local def = LIFTS[liftID]
+        local hours = r.timeSpan / 3600
+        print(string.format("|cffffff00AldorTax timing: %s (%d samples over %.1fh)|r",
+            def and def.displayName or liftID, r.n, hours))
+        print(string.format("  Epoch offset: %.3f ± %.3f  (configured: %.1f, cycle: %.2f)",
+            r.meanEpoch, r.stdEpoch, def and def.epochOffset or 0, def and def.cycleTime or 0))
+        if hours >= 0.1 then
+            print(string.format("  Drift: %+.3fs/hour → cycle error: %+.4fs",
+                r.driftPerHour, r.impliedCycleError))
+            if math.abs(r.impliedCycleError) > 0.05 then
+                print(string.format("  |cffff6600⚠ Implied true cycle: %.3fs (configured: %.2fs)|r",
+                    (def and def.cycleTime or 0) + r.impliedCycleError, def and def.cycleTime or 0))
+            end
+        else
+            print("  Drift: (need >6min of data)")
+        end
+        -- Per-segment breakdown
+        local segs = {}
+        for label, s in pairs(r.segments) do segs[#segs + 1] = { label = label, data = s } end
+        table.sort(segs, function(a, b) return a.label < b.label end)
+        if #segs > 0 then
+            print("  Segment corrections:")
+            for _, seg in ipairs(segs) do
+                local bias = ""
+                if seg.data.n >= 3 and math.abs(seg.data.meanCorr) > 0.15 then
+                    bias = seg.data.meanCorr > 0 and "  ← segment may be too short"
+                                                  or "  ← segment may be too long"
+                end
+                print(string.format("    %-12s n=%-3d  mean=%+.3fs  std=%.3fs%s",
+                    seg.label, seg.data.n, seg.data.meanCorr, seg.data.stdCorr, bias))
+            end
+        end
     elseif msg == "dev" then
         if devTimerFrame:IsShown() then
             devTimerFrame:Hide()
@@ -2601,6 +2748,7 @@ SlashCmdList["ALDORTAX"] = function(msg)
         print("  /atax log           — toggle copyable log panel")
         print("  /atax testmsg       — whisper yourself to test addon messaging")
         print("  /atax unblock Name-Realm  — remove from blocklist")
+        print("  /atax timing [lift] — show timing diagnostics (drift, segment bias)")
         print("  /atax dev           — toggle dev timer overlay (for video calibration)")
     else
         print("|cffff0000AldorTax: Unknown command '" .. msg .. "'. Type /atax help for options.|r")
