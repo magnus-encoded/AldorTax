@@ -13,10 +13,8 @@ log.txt
 
 # Dev-only files
 .claude/
-TESTING.md
-tasks.md
-bug.md
-GEMINI.md
+*.md
+!README.md
 .venv/
 *.py
 *.png

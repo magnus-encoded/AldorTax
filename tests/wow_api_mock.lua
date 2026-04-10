@@ -134,6 +134,7 @@ function FrameMethods:SetColorTexture(...)  end
 function FrameMethods:SetBlendMode(m)       end
 
 -- Button
+function FrameMethods:RegisterForClicks(...)    end
 function FrameMethods:SetNormalTexture(t)       end
 function FrameMethods:SetPushedTexture(t)       end
 function FrameMethods:SetHighlightTexture(t)    end
@@ -197,6 +198,7 @@ function SendAddonMessage(prefix, msg, chatType, target)
 end
 function GetChannelName(name) return 1, name end
 function JoinChannelByName(name) return 1, name end
+function LeaveChannelByName(name) end
 
 function MockAPI.GetSentMessages() return _sentMessages end
 function MockAPI.ClearSentMessages() _sentMessages = {} end

@@ -34,6 +34,6 @@ The UI switches between a full panel (when near the transport) and a compact vie
 
 ## Thank You
 
-Thanks to the [Operasjon Firkl0ver](https://o4k.no/) gaming community for testing, and to Sørlin for the window position persistence idea.
+Thanks to the [Operasjon Firkløver](https://o4k.no/) gaming community for testing, and to Sørlin for the window position persistence idea.
 
 Developed by Fizziness.

@@ -49,7 +49,7 @@ local LIFTS = {
         waitAtTop    = 6.0,
         waitAtBottom = 4.7,
         cycleTime    = 25.0,
-        epochOffset  = 20.0,   -- GetTime() % cycleTime at phase 0 (FALL start); confirmed cross-server
+        epochOffset  = 14.1,   -- measured from timing samples; stable across sessions
         mapX         = 0.4169,
         mapY         = 0.3860,
         mapScale     = 1200,   -- approximate zone width in yards
@@ -96,10 +96,10 @@ local LIFTS = {
         id           = "greatlift",
         displayName  = "Great Lift",
         settingsKey  = "enableGreatLift",
-        fallTime     = 9.65,
+        fallTime     = 9.80,
         riseTime     = 9.70,
         waitAtTop    = 5.20,
-        waitAtBottom = 5.25,
+        waitAtBottom = 5.10,
         cycleTime    = 29.80,
         mapX         = 0.3222,  -- midpoint of east/west for general proximity
         mapY         = 0.2407,
@@ -123,11 +123,12 @@ local LIFTS = {
         id           = "tblift",
         displayName  = "TB Lift",
         settingsKey  = "enableTBLift",
-        fallTime     = 9.65,
-        riseTime     = 9.70,
-        waitAtTop    = 5.20,
-        waitAtBottom = 5.25,
-        cycleTime    = 29.80,
+        fallTime     = 9.50,
+        riseTime     = 9.50,
+        waitAtTop    = 5.50,
+        waitAtBottom = 5.50,
+        cycleTime    = 30.00,
+        epochOffset  = 25.5,   -- measured from timing samples
         mapX         = 0.318, mapY = 0.626,
         mapScale     = 1000,
         nearYards    = 80,
@@ -136,9 +137,10 @@ local LIFTS = {
         nearSubzones = { ["Thunder Bluff"] = true },
         deathZones   = { ["Thunder Bluff"] = true, ["Mulgore"] = true },
         dualLift     = true,
-        dualOffset   = 8.0,     -- left is 8s behind right (viewed from top)
-        barLabel1    = "Left",
-        barLabel2    = "Right",
+        dualOffset   = -3.7,    -- North leads South by 3.7s
+        barLabel1    = "South",
+        barLabel2    = "North",
+        dualBgTexture = "Interface\\AddOns\\AldorTax\\tblift_south",
         segColors    = {
             { r = 0.65, g = 0.35, b = 0.15 },
             { r = 0.30, g = 0.35, b = 0.60 },
@@ -175,6 +177,7 @@ local liftState = {}
 local function InitLiftState(id)
     liftState[id] = {
         lastSync          = 0,
+        lastSync2         = 0,     -- independent sync for secondary platform (dual lifts)
         lastSyncSource    = nil,
         syncOrigin        = nil,   -- "C" = calibrated first-hand, "R" = relayed
         lastAutoBroadcast = 0,
@@ -559,11 +562,47 @@ local function RegisterPrefix()
 end
 
 local function JoinSyncChannel()
+    -- Already in the channel?
+    local existing = GetChannelName(SYNC_CHANNEL)
+    if existing and existing > 0 then
+        syncChanNum = existing
+        return
+    end
+    -- Find the highest occupied channel number so we can land after it.
+    -- WoW assigns the lowest free number, so fill any gaps with temporary
+    -- placeholder channels, join ours (gets highest+1), then leave the fillers.
+    local maxChan = 0
+    for i = 1, 20 do
+        local id, name = GetChannelName(i)
+        if id and id > 0 and name and name ~= "" then
+            maxChan = i
+        end
+    end
+    -- If no channels exist yet (e.g. very early load), defer
+    if maxChan == 0 then
+        Log("|cffffff00AldorTax: no channels established yet — deferring sync channel join|r")
+        return
+    end
+    -- Fill gaps below maxChan so our channel doesn't land in one
+    local fillers = {}
+    for i = 1, maxChan do
+        local id = GetChannelName(i)
+        if not id or id == 0 then
+            local fName = "ATFill" .. i
+            pcall(JoinChannelByName, fName)
+            fillers[#fillers + 1] = fName
+        end
+    end
+    -- Now join the real channel — it lands at maxChan+1
     local ok, err = pcall(JoinChannelByName, SYNC_CHANNEL)
     if not ok then
         Log(string.format("|cffffff00AldorTax: JoinChannelByName failed: %s|r", tostring(err)))
-        return
     end
+    -- Leave the filler channels
+    for _, fName in ipairs(fillers) do
+        pcall(LeaveChannelByName, fName)
+    end
+    -- Poll until the channel is confirmed
     local waited = 0
     local attempts = 0
     local poller = CreateFrame("Frame")
@@ -609,15 +648,14 @@ local lastNoChannelWarn = 0
 local function SendMsg(msg)
     local sent = false
     if settings.syncChannel then
-        -- Re-resolve channel number every send; WoW can renumber channels
+        -- Join on first use so we never steal channel #1 from General
+        if syncChanNum == 0 then
+            JoinSyncChannel()
+        end
         local n = GetChannelName(SYNC_CHANNEL)
         if n and n > 0 then
             syncChanNum = n
             if RawSend(msg, "CHANNEL", n) then sent = true end
-        elseif syncChanNum > 0 then
-            -- Channel lost; attempt rejoin
-            syncChanNum = 0
-            pcall(JoinChannelByName, SYNC_CHANNEL)
         end
     end
     if settings.syncParty then
@@ -809,6 +847,7 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
         if st.lastSyncSource and st.lastSyncSource.name == name and st.lastSyncSource.realm == realm then
             if count and count >= SOFT_BLOCK_THRESHOLD then
                 st.lastSync       = 0
+                st.lastSync2      = 0
                 st.lastSyncSource = nil
                 warnFrame:Hide()
                 print("|cffff0000AldorTax: Active sync invalidated — too many deaths reported.|r")
@@ -858,7 +897,6 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             end
         end
         RegisterPrefix()
-        JoinSyncChannel()
         RestoreSync()
         BuildOptionsPanel()
 
@@ -880,6 +918,7 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             if isFallDeath then
                 BroadcastDied(activeLiftID)
                 liftState[activeLiftID].lastSync       = 0
+                liftState[activeLiftID].lastSync2      = 0
                 liftState[activeLiftID].lastSyncSource = nil
                 warnFrame:Hide()
                 Log("|cffff0000AldorTax: Fall death detected — sync cleared and reported.|r")
@@ -921,6 +960,9 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             if newLiftID ~= activeLiftID then
                 if not activeLiftID then
                     zonedInAt = GetTime()  -- entering a lift zone; delay sends for server rate-limiter
+                    if syncChanNum == 0 and settings.syncChannel then
+                        JoinSyncChannel()
+                    end
                 end
                 activeLiftID = newLiftID
                 if not syncUI then syncUI = BuildSyncUI() end
@@ -1120,7 +1162,19 @@ local function GetPhaseColor(phase, def)
     end
 end
 
--- (VBarClickToPhase and GetPhaseColorMuted removed — dual-lift sync uses TOP/BTM buttons now)
+-- Returns a def-like table with the secondary platform's segment times.
+-- Falls back to primary values for any field not set on the secondary.
+local function SecDef(def)
+    if not def.cycleTime2 then return def end
+    return {
+        fallTime     = def.fallTime2     or def.fallTime,
+        waitAtBottom = def.waitAtBottom2 or def.waitAtBottom,
+        riseTime     = def.riseTime2     or def.riseTime,
+        waitAtTop    = def.waitAtTop2    or def.waitAtTop,
+        cycleTime    = def.cycleTime2,
+        segColors    = def.segColors,
+    }
+end
 
 BuildSyncUI = function()
     if AldorTaxSyncUI then return AldorTaxSyncUI end
@@ -1131,7 +1185,7 @@ BuildSyncUI = function()
     local PAD           = 12
     local VBAR_W        = 26     -- vertical bar width
     local VBAR_H        = 130    -- vertical bar height
-    local VBAR_GAP      = 40     -- gap between the two vertical bars
+    local VBAR_GAP      = 70     -- gap between the two vertical bars
 
     local barW      = BAR_W_FULL
     local isCompact = false
@@ -1283,6 +1337,11 @@ BuildSyncUI = function()
     local dualContainer = CreateFrame("Frame", nil, p)
     dualContainer:Hide()
 
+    -- Optional background texture (e.g. screenshot showing lift positions)
+    local dualBgTex = dualContainer:CreateTexture(nil, "BACKGROUND")
+    dualBgTex:SetAlpha(0.22)
+    dualBgTex:Hide()
+
     -- Phase segment labels for click feedback
     local VBAR_PHASE_NAMES = { "FALL", "BOTTOM", "RISE", "TOP" }
 
@@ -1360,7 +1419,7 @@ BuildSyncUI = function()
         end)
         clickBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText("Click to sync (" .. label .. ")", 1, 0.82, 0, 1)
+            GameTooltip:SetText("Click to sync (" .. lbl:GetText() .. ")", 1, 0.82, 0, 1)
             GameTooltip:AddLine("Top half: click when lift arrives at top", 0.7, 0.7, 0.7)
             GameTooltip:AddLine("Bottom half: click when lift arrives at bottom", 0.7, 0.7, 0.7)
             GameTooltip:Show()
@@ -1418,25 +1477,39 @@ BuildSyncUI = function()
     OnBarClick = function(isPrimary, clickFrac)
         if not activeLiftID then return end
         local def = LIFTS[activeLiftID]
-        local offset = def.dualOffset or def.cycleTime / 2
-        local barLabel = isPrimary and (def.barLabel1 or "East") or (def.barLabel2 or "West")
+        local sd = isPrimary and def or SecDef(def)
+        local barLabel = isPrimary and (def.barLabel1 or "Primary") or (def.barLabel2 or "Secondary")
         local phaseName, phaseStart
-        if clickFrac >= 0.5 then
+        if clickFrac >= 0.75 then
             phaseName  = "TOP (" .. barLabel .. ")"
-            phaseStart = def.fallTime + def.waitAtBottom + def.riseTime
+            phaseStart = sd.fallTime + sd.waitAtBottom + sd.riseTime
+        elseif clickFrac >= 0.50 then
+            phaseName  = "FALL (" .. barLabel .. ")"
+            phaseStart = 0
+        elseif clickFrac >= 0.25 then
+            phaseName  = "RISE (" .. barLabel .. ")"
+            phaseStart = sd.fallTime + sd.waitAtBottom
         else
             phaseName  = "BOTTOM (" .. barLabel .. ")"
-            phaseStart = def.fallTime
+            phaseStart = sd.fallTime
         end
-        -- Secondary bar is offset from primary; convert to primary phase
-        if not isPrimary then
-            phaseStart = (phaseStart + offset) % def.cycleTime
+        if isPrimary then
+            PerformCalibrationClick(activeLiftID, phaseStart, phaseName)
+        else
+            -- Secondary platform: independent sync (separate cycle)
+            local st = liftState[activeLiftID]
+            if not st then return end
+            local now = GetTime() - CLICK_REACTION_TIME
+            st.lastSync2 = now - phaseStart
+            AppendSyncLog(string.format(
+                "%s|%s|%s|%.3f|%.3f",
+                date("%Y-%m-%d %H:%M:%S"), activeLiftID, phaseName, GetServerTime(), phaseStart))
+            Log(string.format("|cff00ff00AldorTax: %s synced at %s|r", def.displayName, phaseName))
         end
-        PerformCalibrationClick(activeLiftID, phaseStart, phaseName)
     end
 
-    local vbar1 = MakeVBar(dualContainer, "East", true)
-    local vbar2 = MakeVBar(dualContainer, "West", false)
+    local vbar1 = MakeVBar(dualContainer, "Primary", true)
+    local vbar2 = MakeVBar(dualContainer, "Secondary", false)
 
     -- ═════════════════════════════════════════════════════════════════════════
     -- DUAL HORIZONTAL BAR ELEMENTS (tram mode: Deeprun Tram)
@@ -1680,12 +1753,18 @@ BuildSyncUI = function()
                        string.format("AldorTax Tram: South departs %s in %02.0fs", nameB, t)
             end
         elseif def.dualLift then
-            local offset = def.dualOffset or def.cycleTime / 2
+            local sd = SecDef(def)
             local ttfPrimary = def.cycleTime - phase
-            local phase2 = (phase + offset) % def.cycleTime
-            local ttfSecondary = def.cycleTime - phase2
-            local platName1 = def.barLabel1 or "East"
-            local platName2 = def.barLabel2 or "West"
+            local phase2
+            if st.lastSync2 > 0 then
+                phase2 = (GetTime() - st.lastSync2) % sd.cycleTime
+            else
+                local offset = def.dualOffset or def.cycleTime / 2
+                phase2 = (phase + offset) % sd.cycleTime
+            end
+            local ttfSecondary = sd.cycleTime - phase2
+            local platName1 = def.barLabel1 or "Primary"
+            local platName2 = def.barLabel2 or "Secondary"
             local platName, ttf
             if ttfPrimary <= ttfSecondary then
                 platName, ttf = platName1, ttfPrimary
@@ -1798,6 +1877,10 @@ BuildSyncUI = function()
         vbar2.bg:ClearAllPoints()
         vbar2.bg:SetPoint("TOP", dualContainer, "TOP",  (VBAR_GAP / 2 + VBAR_W / 2), -36)
 
+        -- Background image fills entire container
+        dualBgTex:ClearAllPoints()
+        dualBgTex:SetAllPoints(dualContainer)
+
         sayBtn:ClearAllPoints()
         sayBtn:SetPoint("BOTTOM", p, "BOTTOM", 0, 8)
     end
@@ -1815,6 +1898,8 @@ BuildSyncUI = function()
         vbar1.bg:SetPoint("LEFT", dualContainer, "LEFT", PAD, 0)
         vbar2.bg:ClearAllPoints()
         vbar2.bg:SetPoint("LEFT", vbar1.bg, "RIGHT", VBAR_GAP - 6, 0)
+
+        dualBgTex:Hide()  -- no room in compact mode
 
         sayIcon:ClearAllPoints()
         sayIcon:SetPoint("LEFT", vbar2.bg, "RIGHT", 8, 0)
@@ -1979,8 +2064,15 @@ BuildSyncUI = function()
         if isDual then
             title:SetText(def.displayName .. "  |cff888888click segment to sync|r")
             -- Update bar labels for this lift type
-            vbar1.label:SetText(def.barLabel1 or "East")
-            vbar2.label:SetText(def.barLabel2 or "West")
+            vbar1.label:SetText(def.barLabel1 or "Primary")
+            vbar2.label:SetText(def.barLabel2 or "Secondary")
+            -- Background image (e.g. screenshot showing platform positions)
+            if def.dualBgTexture then
+                dualBgTex:SetTexture(def.dualBgTexture)
+                dualBgTex:Show()
+            else
+                dualBgTex:Hide()
+            end
         else
             title:SetText(def.displayName .. "  |cff888888click phase to sync|r")
         end
@@ -2029,7 +2121,10 @@ BuildSyncUI = function()
                     if not activeLiftID then return end
                     local ld = LIFTS[activeLiftID]
                     local ps = atA
-                    if not primary and ld.dualLift then ps = (ps + ld.cycleTime / 2) % ld.cycleTime end
+                    if not primary and ld.dualLift then
+                        local off = ld.dualOffset or ld.cycleTime / 2
+                        ps = (ps + off) % ld.cycleTime
+                    end
                     PerformCalibrationClick(activeLiftID, ps, nameA .. (primary and "" or " (2nd tram)"))
                 end)
                 -- Configure station button B (right)
@@ -2046,7 +2141,10 @@ BuildSyncUI = function()
                     if not activeLiftID then return end
                     local ld = LIFTS[activeLiftID]
                     local ps = atB
-                    if not primary and ld.dualLift then ps = (ps + ld.cycleTime / 2) % ld.cycleTime end
+                    if not primary and ld.dualLift then
+                        local off = ld.dualOffset or ld.cycleTime / 2
+                        ps = (ps + off) % ld.cycleTime
+                    end
                     PerformCalibrationClick(activeLiftID, ps, nameB .. (primary and "" or " (2nd tram)"))
                 end)
             end
@@ -2272,8 +2370,11 @@ BuildSyncUI = function()
                 sourceLabel:SetText("|cff00cc00local|r")
             end
         elseif isDual then
-            -- Dual vertical bars
-            if st.lastSync <= 0 then
+            -- Dual vertical bars (each platform tracked independently)
+            local hasSync1 = st.lastSync > 0
+            local hasSync2 = st.lastSync2 > 0
+
+            if not hasSync1 and not hasSync2 then
                 vbar1.cursor:ClearAllPoints()
                 vbar1.cursor:SetPoint("CENTER", vbar1.overlay, "BOTTOM", 0, -5)
                 vbar1.glow:ClearAllPoints()
@@ -2295,21 +2396,36 @@ BuildSyncUI = function()
                 return
             end
 
-            local offset = def.dualOffset or def.cycleTime / 2
-            local phase1 = (GetTime() - st.lastSync) % def.cycleTime
-            local phase2 = (phase1 + offset) % def.cycleTime
-            -- Helper: get phase name from cycle phase
-            local function PhaseName(ph)
-                if ph < def.fallTime then return "FALL"
-                elseif ph < def.fallTime + def.waitAtBottom then return "BTM"
-                elseif ph < def.fallTime + def.waitAtBottom + def.riseTime then return "RISE"
+            local sd = SecDef(def)
+
+            -- Primary bar: from lastSync, or estimate from lastSync2 + offset
+            local phase1
+            if hasSync1 then
+                phase1 = (GetTime() - st.lastSync) % def.cycleTime
+            else
+                local offset = def.dualOffset or def.cycleTime / 2
+                phase1 = ((GetTime() - st.lastSync2) - offset) % def.cycleTime
+            end
+            -- Secondary bar: from lastSync2, or estimate from lastSync + offset
+            local phase2
+            if hasSync2 then
+                phase2 = (GetTime() - st.lastSync2) % sd.cycleTime
+            else
+                local offset = def.dualOffset or def.cycleTime / 2
+                phase2 = (phase1 + offset) % sd.cycleTime
+            end
+            -- Helper: get phase name from cycle phase using given segment def
+            local function PhaseName(ph, d)
+                if ph < d.fallTime then return "FALL"
+                elseif ph < d.fallTime + d.waitAtBottom then return "BTM"
+                elseif ph < d.fallTime + d.waitAtBottom + d.riseTime then return "RISE"
                 else return "TOP" end
             end
 
             local h1 = GetLiftHeight(phase1, def)
-            local h2 = GetLiftHeight(phase2, def)
+            local h2 = GetLiftHeight(phase2, sd)
             local r1, g1, b1 = GetPhaseColor(phase1, def)
-            local r2, g2, b2 = GetPhaseColor(phase2, def)
+            local r2, g2, b2 = GetPhaseColor(phase2, sd)
 
             -- Primary bar: phase-colored cursor with glow
             vbar1.cursor:SetColorTexture(r1, g1, b1, 0.90)
@@ -2318,7 +2434,7 @@ BuildSyncUI = function()
             vbar1.glow:SetColorTexture(r1, g1, b1, 0.25)
             vbar1.glow:ClearAllPoints()
             vbar1.glow:SetPoint("CENTER", vbar1.cursor, "CENTER")
-            vbar1.phaseLbl:SetText(PhaseName(phase1))
+            vbar1.phaseLbl:SetText(PhaseName(phase1, def))
             vbar1.phaseLbl:SetTextColor(r1, g1, b1, 0.85)
             vbar1.phaseLbl:ClearAllPoints()
             vbar1.phaseLbl:SetPoint("LEFT", vbar1.cursor, "RIGHT", 4, 0)
@@ -2331,11 +2447,11 @@ BuildSyncUI = function()
             vbar2.glow:SetColorTexture(r2, g2, b2, 0.12)
             vbar2.glow:ClearAllPoints()
             vbar2.glow:SetPoint("CENTER", vbar2.cursor, "CENTER")
-            vbar2.phaseLbl:SetText(PhaseName(phase2))
+            vbar2.phaseLbl:SetText(PhaseName(phase2, sd))
             vbar2.phaseLbl:SetTextColor(r2, g2, b2, 0.55)
             vbar2.phaseLbl:ClearAllPoints()
             vbar2.phaseLbl:SetPoint("RIGHT", vbar2.cursor, "LEFT", -4, 0)
-            vbar2.timeLabel:SetText(string.format("%.1fs", def.cycleTime - phase2))
+            vbar2.timeLabel:SetText(string.format("%.1fs", sd.cycleTime - phase2))
 
             if st.lastSyncSource then
                 sourceLabel:SetText(string.format("|cff88ff88received from %s|r", st.lastSyncSource.name))
@@ -2382,9 +2498,16 @@ BuildSyncUI = function()
             local phase = (GetTime() - st.lastSync) % def.cycleTime
             local showSay = phase >= topStart
             if def.dualLift then
-                local offset = def.dualOffset or def.cycleTime / 2
-                local phase2 = (phase + offset) % def.cycleTime
-                showSay = showSay or phase2 >= topStart
+                local sd = SecDef(def)
+                local topStart2 = sd.fallTime + sd.waitAtBottom + sd.riseTime
+                local phase2
+                if st.lastSync2 > 0 then
+                    phase2 = (GetTime() - st.lastSync2) % sd.cycleTime
+                else
+                    local offset = def.dualOffset or def.cycleTime / 2
+                    phase2 = (phase + offset) % sd.cycleTime
+                end
+                showSay = showSay or phase2 >= topStart2
             end
             if showSay then sayBtn:Show() else sayBtn:Hide() end
         end
@@ -2393,6 +2516,552 @@ BuildSyncUI = function()
     return p
 end
 
+
+-- ─── Dev panel ─────────────────────────────────────────────────────────────
+
+local devPanel
+
+local function BuildDevPanel()
+    local DEV_BAR_W = 420
+    local DEV_BAR_H = 18
+    local DEV_PAD   = 12
+
+    local p = CreateFrame("Frame", "AldorTaxDevPanel", UIParent, "BackdropTemplate")
+    p:SetSize(DEV_BAR_W + DEV_PAD * 2, 370)
+    p:SetPoint("CENTER", 300, 0)
+    p:SetFrameStrata("DIALOG")
+    p:SetMovable(true)
+    p:EnableMouse(true)
+    p:RegisterForDrag("LeftButton")
+    p:SetScript("OnDragStart", p.StartMoving)
+    p:SetScript("OnDragStop",  p.StopMovingOrSizing)
+    p:SetBackdrop({
+        bgFile   = "Interface/ChatFrame/ChatFrameBackground",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    p:SetBackdropColor(0.06, 0.06, 0.09, 0.95)
+    p:SetBackdropBorderColor(0.50, 0.40, 0.20, 0.80)
+
+    -- Title
+    local title = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", DEV_PAD, -8)
+    title:SetTextColor(1, 0.82, 0)
+
+    -- Close button
+    local closeBtn = CreateFrame("Button", nil, p, "UIPanelCloseButton")
+    closeBtn:SetPoint("TOPRIGHT", -2, -2)
+    closeBtn:SetScript("OnClick", function() p:Hide() end)
+
+    -- ── Helper: make a labeled number input ─────────────────────────────────
+    local function MakeInput(parent, label, x, y, width, tooltip)
+        local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        lbl:SetPoint("TOPLEFT", x, y)
+        lbl:SetText(label)
+        lbl:SetTextColor(0.75, 0.75, 0.65)
+
+        local bg = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+        bg:SetPoint("TOPLEFT", x, y - 12)
+        bg:SetSize(width, 20)
+        bg:SetBackdrop({
+            bgFile = "Interface/ChatFrame/ChatFrameBackground",
+            edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+            tile = true, tileSize = 4, edgeSize = 8,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        bg:SetBackdropColor(0, 0, 0, 0.8)
+        bg:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.6)
+
+        local eb = CreateFrame("EditBox", nil, bg)
+        eb:SetPoint("TOPLEFT", 4, -2)
+        eb:SetPoint("BOTTOMRIGHT", -4, 2)
+        eb:SetFontObject("ChatFontSmall")
+        eb:SetAutoFocus(false)
+        eb:SetNumeric(false)  -- we handle decimals ourselves
+        eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        if tooltip then
+            eb:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:SetText(tooltip, 1, 1, 1, 1, true)
+                GameTooltip:Show()
+            end)
+            eb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        end
+
+        return eb, lbl
+    end
+
+    -- ── Segment bars ────────────────────────────────────────────────────────
+    local SEG_NAMES = { "FALL", "BTM", "RISE", "TOP" }
+
+    local function MakeSegBar(parent, yTop, label, alpha)
+        local row = {}
+        row.label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        row.label:SetPoint("TOPLEFT", DEV_PAD, yTop)
+        row.label:SetText(label)
+        row.label:SetTextColor(0.85, 0.78, 0.50)
+
+        row.bg = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+        row.bg:SetPoint("TOPLEFT", DEV_PAD - 1, yTop - 13)
+        row.bg:SetSize(DEV_BAR_W + 2, DEV_BAR_H + 2)
+        row.bg:SetBackdrop({
+            bgFile = "Interface/ChatFrame/ChatFrameBackground",
+            tile = true, tileSize = 4,
+        })
+        row.bg:SetBackdropColor(0.02, 0.02, 0.04, 0.9)
+
+        row.bar = CreateFrame("Frame", nil, parent)
+        row.bar:SetPoint("TOPLEFT", DEV_PAD, yTop - 14)
+        row.bar:SetSize(DEV_BAR_W, DEV_BAR_H)
+
+        row.segs = {}
+        row.segLabels = {}
+        row.segBtns = {}
+        for i = 1, 4 do
+            local seg = row.bar:CreateTexture(nil, "ARTWORK")
+            seg:SetHeight(DEV_BAR_H)
+            row.segs[i] = seg
+
+            local lbl = row.bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            lbl:SetTextColor(1, 1, 1, 0.85)
+            row.segLabels[i] = lbl
+
+            -- Clickable button overlaying each segment
+            local btn = CreateFrame("Button", nil, row.bar)
+            btn:RegisterForClicks("LeftButtonUp")
+            btn:SetHeight(DEV_BAR_H)
+            btn:SetFrameLevel(row.bar:GetFrameLevel() + 3)
+            local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetColorTexture(1, 1, 1, 0.12)
+            hl:SetAllPoints()
+            hl:SetBlendMode("ADD")
+            row.segBtns[i] = btn
+        end
+
+        row.overlay = CreateFrame("Frame", nil, parent)
+        row.overlay:SetPoint("TOPLEFT", DEV_PAD, yTop - 14)
+        row.overlay:SetSize(DEV_BAR_W, DEV_BAR_H)
+        row.overlay:SetFrameLevel(row.bar:GetFrameLevel() + 5)
+        row.overlay:EnableMouse(false)
+
+        row.cursor = row.overlay:CreateTexture(nil, "OVERLAY", nil, 2)
+        row.cursor:SetColorTexture(1, 1, 1, 0.95)
+        row.cursor:SetSize(3, DEV_BAR_H + 4)
+
+        row.glow = row.overlay:CreateTexture(nil, "OVERLAY", nil, 1)
+        row.glow:SetColorTexture(1, 1, 1, 0.20)
+        row.glow:SetSize(9, DEV_BAR_H + 6)
+        row.glow:SetBlendMode("ADD")
+
+        row.timeLabel = row.overlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        row.timeLabel:SetShadowOffset(1, -1)
+        row.timeLabel:SetShadowColor(0, 0, 0, 1)
+
+        row.alpha = alpha or 1.0
+        return row
+    end
+
+    local bar1 = MakeSegBar(p, -28, "Primary", 1.0)
+    local bar2 = MakeSegBar(p, -70, "Secondary (offset)", 0.65)
+
+    -- ── Layout segments for a bar ───────────────────────────────────────────
+    local function LayoutBar(row, def, segOverrides, isPrimary)
+        local ft  = segOverrides and segOverrides.fallTime     or def.fallTime
+        local wb  = segOverrides and segOverrides.waitAtBottom or def.waitAtBottom
+        local rt  = segOverrides and segOverrides.riseTime     or def.riseTime
+        local wt  = segOverrides and segOverrides.waitAtTop    or def.waitAtTop
+        local cyc = ft + wb + rt + wt
+        if cyc <= 0 then return end
+        local times = { ft, wb, rt, wt }
+        local starts = { 0, ft, ft + wb, ft + wb + rt }
+        local xOff = 0
+        for i = 1, 4 do
+            local w = (times[i] / cyc) * DEV_BAR_W
+            row.segs[i]:ClearAllPoints()
+            row.segs[i]:SetPoint("TOPLEFT", row.bar, "TOPLEFT", xOff, 0)
+            row.segs[i]:SetSize(w, DEV_BAR_H)
+            local c = def.segColors and def.segColors[i]
+            local a = row.alpha
+            if c then
+                row.segs[i]:SetColorTexture(c.r, c.g, c.b, 0.85 * a)
+            else
+                row.segs[i]:SetColorTexture(0.3, 0.3, 0.3, 0.5 * a)
+            end
+            row.segs[i]:Show()
+            row.segLabels[i]:ClearAllPoints()
+            row.segLabels[i]:SetPoint("CENTER", row.bar, "TOPLEFT", xOff + w / 2, -DEV_BAR_H / 2)
+            row.segLabels[i]:SetText(string.format("%s\n%.2f", SEG_NAMES[i], times[i]))
+            row.segLabels[i]:SetAlpha(a)
+            row.segLabels[i]:Show()
+            -- Position and wire up click button
+            local btn = row.segBtns[i]
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", row.bar, "TOPLEFT", xOff, 0)
+            btn:SetSize(w, DEV_BAR_H)
+            local segStart = starts[i]
+            local segName = SEG_NAMES[i]
+            btn:SetScript("OnClick", function()
+                if not devLiftID then return end
+                local curDef = LIFTS[devLiftID]
+                if not curDef then return end
+                if isPrimary then
+                    PerformCalibrationClick(devLiftID, segStart, segName)
+                else
+                    local st = liftState[devLiftID]
+                    if not st then return end
+                    local now = GetTime() - CLICK_REACTION_TIME
+                    st.lastSync2 = now - segStart
+                    Log(string.format("|cff00ff00AldorTax: %s synced at %s (%s)|r",
+                        curDef.displayName, segName, curDef.barLabel2 or "Secondary"))
+                end
+            end)
+            btn:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:SetText(string.format("Click to sync at %s", segName), 1, 0.82, 0)
+                GameTooltip:Show()
+            end)
+            btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            btn:Show()
+            xOff = xOff + w
+        end
+    end
+
+    local function UpdateBarCursor(row, phase, def, segOverrides)
+        local ft  = segOverrides and segOverrides.fallTime     or def.fallTime
+        local wb  = segOverrides and segOverrides.waitAtBottom or def.waitAtBottom
+        local rt  = segOverrides and segOverrides.riseTime     or def.riseTime
+        local wt  = segOverrides and segOverrides.waitAtTop    or def.waitAtTop
+        local cyc = ft + wb + rt + wt
+        if cyc <= 0 then return end
+        local xPos = (phase / cyc) * DEV_BAR_W
+        local a = row.alpha
+        -- Segment color for cursor
+        local seg
+        if phase < ft then seg = 1
+        elseif phase < ft + wb then seg = 2
+        elseif phase < ft + wb + rt then seg = 3
+        else seg = 4 end
+        local c = def.segColors and def.segColors[seg]
+        local r, g, b = c and c.r or 0.8, c and c.g or 0.8, c and c.b or 0.8
+        row.cursor:SetColorTexture(r, g, b, 0.95 * a)
+        row.cursor:ClearAllPoints()
+        row.cursor:SetPoint("CENTER", row.overlay, "LEFT", xPos, 0)
+        row.glow:SetColorTexture(r, g, b, 0.25 * a)
+        row.glow:ClearAllPoints()
+        row.glow:SetPoint("CENTER", row.cursor, "CENTER")
+        local ttd = cyc - phase
+        row.timeLabel:SetText(string.format("%.1fs", ttd))
+        row.timeLabel:SetAlpha(a)
+        row.timeLabel:ClearAllPoints()
+        row.timeLabel:SetPoint("BOTTOM", row.cursor, "TOP", 0, 1)
+    end
+
+    -- ── Primary segment time inputs ────────────────────────────────────────
+    local inputY = -112
+
+    local segHdr = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    segHdr:SetPoint("TOPLEFT", DEV_PAD, inputY)
+    segHdr:SetText("Primary Segments")
+    segHdr:SetTextColor(0.85, 0.78, 0.50)
+
+    local colW = 70
+    local inputStartX = DEV_PAD
+    local inputStartY = inputY - 18
+
+    local ebFall, _   = MakeInput(p, "Fall",   inputStartX,              inputStartY, colW, "Fall duration (seconds)")
+    local ebBottom, _  = MakeInput(p, "Bottom", inputStartX + colW + 10, inputStartY, colW, "Wait at bottom (seconds)")
+    local ebRise, _    = MakeInput(p, "Rise",   inputStartX + (colW + 10) * 2, inputStartY, colW, "Rise duration (seconds)")
+    local ebTop, _     = MakeInput(p, "Top",    inputStartX + (colW + 10) * 3, inputStartY, colW, "Wait at top (seconds)")
+
+    local cycleLabel = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    cycleLabel:SetPoint("TOPLEFT", inputStartX + (colW + 10) * 4 + 5, inputStartY - 12)
+    cycleLabel:SetTextColor(0.6, 0.8, 0.6)
+
+    -- ── Secondary segment time inputs ───────────────────────────────────────
+    local sec2Y = inputStartY - 44
+
+    local seg2Hdr = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    seg2Hdr:SetPoint("TOPLEFT", DEV_PAD, sec2Y)
+    seg2Hdr:SetText("Secondary Segments")
+    seg2Hdr:SetTextColor(0.70, 0.65, 0.45)
+
+    local sec2StartY = sec2Y - 18
+
+    local ebFall2, _   = MakeInput(p, "Fall",   inputStartX,              sec2StartY, colW, "Secondary fall duration (seconds)")
+    local ebBottom2, _ = MakeInput(p, "Bottom", inputStartX + colW + 10, sec2StartY, colW, "Secondary wait at bottom (seconds)")
+    local ebRise2, _   = MakeInput(p, "Rise",   inputStartX + (colW + 10) * 2, sec2StartY, colW, "Secondary rise duration (seconds)")
+    local ebTop2, _    = MakeInput(p, "Top",    inputStartX + (colW + 10) * 3, sec2StartY, colW, "Secondary wait at top (seconds)")
+
+    local cycleLabel2 = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    cycleLabel2:SetPoint("TOPLEFT", inputStartX + (colW + 10) * 4 + 5, sec2StartY - 12)
+    cycleLabel2:SetTextColor(0.6, 0.8, 0.6)
+
+    -- Group secondary elements for show/hide
+    local sec2Elements = { seg2Hdr, ebFall2:GetParent(), ebBottom2:GetParent(), ebRise2:GetParent(), ebTop2:GetParent(), cycleLabel2 }
+
+    -- Offset input
+    local offsetY = sec2StartY - 42
+
+    local offsetHdr = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    offsetHdr:SetPoint("TOPLEFT", DEV_PAD, offsetY)
+    offsetHdr:SetText("Dual Offset")
+    offsetHdr:SetTextColor(0.85, 0.78, 0.50)
+
+    local ebOffset, _ = MakeInput(p, "Offset (s)", DEV_PAD, offsetY - 18, 80,
+        "Phase offset of secondary lift from primary (seconds)")
+
+    local offsetInfo = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    offsetInfo:SetPoint("LEFT", ebOffset:GetParent(), "RIGHT", 8, 0)
+    offsetInfo:SetTextColor(0.6, 0.6, 0.6)
+
+    -- ── Apply / Revert buttons ──────────────────────────────────────────────
+    local btnY = offsetY - 58
+
+    local applyBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    applyBtn:SetSize(90, 22)
+    applyBtn:SetPoint("TOPLEFT", DEV_PAD, btnY)
+    applyBtn:SetText("Apply")
+    applyBtn:SetNormalFontObject("GameFontNormalSmall")
+
+    local revertBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    revertBtn:SetSize(90, 22)
+    revertBtn:SetPoint("LEFT", applyBtn, "RIGHT", 8, 0)
+    revertBtn:SetText("Revert")
+    revertBtn:SetNormalFontObject("GameFontNormalSmall")
+
+    local statusLabel = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    statusLabel:SetPoint("LEFT", revertBtn, "RIGHT", 10, 0)
+    statusLabel:SetTextColor(0.5, 0.8, 0.5)
+
+    -- ── State ───────────────────────────────────────────────────────────────
+    local devLiftID = nil
+    local origDef = nil       -- stashed original values for Revert
+    local devOverrides = nil  -- { fallTime, waitAtBottom, riseTime, waitAtTop }
+    local devOverrides2 = nil -- secondary overrides
+    local devOffset = nil
+
+    local function ReadInputs()
+        local ft = tonumber(ebFall:GetText())
+        local wb = tonumber(ebBottom:GetText())
+        local rt = tonumber(ebRise:GetText())
+        local wt = tonumber(ebTop:GetText())
+        local off = tonumber(ebOffset:GetText())
+        return ft, wb, rt, wt, off
+    end
+
+    local function ReadInputs2()
+        local ft = tonumber(ebFall2:GetText())
+        local wb = tonumber(ebBottom2:GetText())
+        local rt = tonumber(ebRise2:GetText())
+        local wt = tonumber(ebTop2:GetText())
+        return ft, wb, rt, wt
+    end
+
+    local function PopulateInputs(def)
+        ebFall:SetText(string.format("%.2f", def.fallTime))
+        ebBottom:SetText(string.format("%.2f", def.waitAtBottom))
+        ebRise:SetText(string.format("%.2f", def.riseTime))
+        ebTop:SetText(string.format("%.2f", def.waitAtTop))
+        local cyc = def.fallTime + def.waitAtBottom + def.riseTime + def.waitAtTop
+        cycleLabel:SetText(string.format("= %.2fs", cyc))
+        -- Secondary: use dedicated values or fall back to primary
+        local sd = SecDef(def)
+        ebFall2:SetText(string.format("%.2f", sd.fallTime))
+        ebBottom2:SetText(string.format("%.2f", sd.waitAtBottom))
+        ebRise2:SetText(string.format("%.2f", sd.riseTime))
+        ebTop2:SetText(string.format("%.2f", sd.waitAtTop))
+        local cyc2 = sd.fallTime + sd.waitAtBottom + sd.riseTime + sd.waitAtTop
+        cycleLabel2:SetText(string.format("= %.2fs", cyc2))
+        local off = def.dualOffset or (def.dualLift and def.cycleTime / 2 or 0)
+        ebOffset:SetText(string.format("%.2f", off))
+    end
+
+    local function UpdateCycleLabels()
+        local ft, wb, rt, wt = ReadInputs()
+        if ft and wb and rt and wt then
+            cycleLabel:SetText(string.format("= %.2fs", ft + wb + rt + wt))
+        end
+        local ft2, wb2, rt2, wt2 = ReadInputs2()
+        if ft2 and wb2 and rt2 and wt2 then
+            cycleLabel2:SetText(string.format("= %.2fs", ft2 + wb2 + rt2 + wt2))
+        end
+    end
+
+    -- Auto-update cycle labels on any input change
+    for _, eb in ipairs({ ebFall, ebBottom, ebRise, ebTop, ebFall2, ebBottom2, ebRise2, ebTop2 }) do
+        eb:SetScript("OnTextChanged", function() UpdateCycleLabels() end)
+    end
+
+    local function ConfigureLift(liftID)
+        local def = LIFTS[liftID]
+        if not def then return end
+        devLiftID = liftID
+        -- Stash originals on first configure (or if switching lifts)
+        if not origDef or origDef._id ~= liftID then
+            origDef = {
+                _id          = liftID,
+                fallTime     = def.fallTime,
+                waitAtBottom = def.waitAtBottom,
+                riseTime     = def.riseTime,
+                waitAtTop    = def.waitAtTop,
+                cycleTime    = def.cycleTime,
+                dualOffset   = def.dualOffset,
+                fallTime2     = def.fallTime2,
+                waitAtBottom2 = def.waitAtBottom2,
+                riseTime2     = def.riseTime2,
+                waitAtTop2    = def.waitAtTop2,
+                cycleTime2    = def.cycleTime2,
+            }
+        end
+        devOverrides = nil
+        devOverrides2 = nil
+        devOffset = nil
+        title:SetText(string.format("Dev: %s", def.displayName))
+        PopulateInputs(def)
+        LayoutBar(bar1, def, nil, true)
+        if def.dualLift then
+            bar2.label:SetText(string.format("Secondary (%s)",
+                def.barLabel2 or "Secondary"))
+            bar2.bg:Show(); bar2.bar:Show(); bar2.overlay:Show()
+            bar2.label:Show()
+            local sd = SecDef(def)
+            LayoutBar(bar2, sd, nil, false)
+            for _, el in ipairs(sec2Elements) do el:Show() end
+            offsetHdr:Show(); ebOffset:GetParent():Show(); offsetInfo:Show()
+        else
+            bar2.bg:Hide(); bar2.bar:Hide(); bar2.overlay:Hide()
+            bar2.label:Hide()
+            for i = 1, 4 do bar2.segs[i]:Hide(); bar2.segLabels[i]:Hide() end
+            bar2.cursor:Hide(); bar2.glow:Hide(); bar2.timeLabel:SetText("")
+            for _, el in ipairs(sec2Elements) do el:Hide() end
+            offsetHdr:Hide(); ebOffset:GetParent():Hide(); offsetInfo:Hide()
+        end
+        statusLabel:SetText("")
+    end
+    p.ConfigureLift = ConfigureLift
+
+    -- Apply: write input values into the live LIFTS definition
+    applyBtn:SetScript("OnClick", function()
+        if not devLiftID then return end
+        local def = LIFTS[devLiftID]
+        if not def then return end
+        local ft, wb, rt, wt, off = ReadInputs()
+        if not (ft and wb and rt and wt) then
+            statusLabel:SetText("|cffff4400Invalid primary input|r")
+            return
+        end
+        if ft <= 0 or wb <= 0 or rt <= 0 or wt <= 0 then
+            statusLabel:SetText("|cffff4400All primary values must be > 0|r")
+            return
+        end
+        def.fallTime     = ft
+        def.waitAtBottom = wb
+        def.riseTime     = rt
+        def.waitAtTop    = wt
+        def.cycleTime    = ft + wb + rt + wt
+        if off and def.dualLift then
+            def.dualOffset = off
+            devOffset = off
+        end
+        devOverrides = { fallTime = ft, waitAtBottom = wb, riseTime = rt, waitAtTop = wt }
+        LayoutBar(bar1, def, devOverrides, true)
+        -- Secondary segments
+        if def.dualLift then
+            local ft2, wb2, rt2, wt2 = ReadInputs2()
+            if not (ft2 and wb2 and rt2 and wt2) then
+                statusLabel:SetText("|cffff4400Invalid secondary input|r")
+                return
+            end
+            if ft2 <= 0 or wb2 <= 0 or rt2 <= 0 or wt2 <= 0 then
+                statusLabel:SetText("|cffff4400All secondary values must be > 0|r")
+                return
+            end
+            def.fallTime2     = ft2
+            def.waitAtBottom2 = wb2
+            def.riseTime2     = rt2
+            def.waitAtTop2    = wt2
+            def.cycleTime2    = ft2 + wb2 + rt2 + wt2
+            devOverrides2 = { fallTime = ft2, waitAtBottom = wb2, riseTime = rt2, waitAtTop = wt2 }
+            local sd = SecDef(def)
+            LayoutBar(bar2, sd, devOverrides2, false)
+        end
+        -- Refresh the sync UI if it exists
+        if syncUI and syncUI.ReconfigureLift then
+            syncUI.ReconfigureLift(devLiftID)
+        end
+        local msg = string.format("|cff88ff88Applied (pri=%.2fs", def.cycleTime)
+        if def.cycleTime2 then
+            msg = msg .. string.format(", sec=%.2fs", def.cycleTime2)
+        end
+        statusLabel:SetText(msg .. ")|r")
+    end)
+
+    -- Revert: restore original values
+    revertBtn:SetScript("OnClick", function()
+        if not devLiftID or not origDef then return end
+        local def = LIFTS[devLiftID]
+        if not def then return end
+        def.fallTime     = origDef.fallTime
+        def.waitAtBottom = origDef.waitAtBottom
+        def.riseTime     = origDef.riseTime
+        def.waitAtTop    = origDef.waitAtTop
+        def.cycleTime    = origDef.cycleTime
+        if origDef.dualOffset then def.dualOffset = origDef.dualOffset end
+        -- Restore secondary segments
+        def.fallTime2     = origDef.fallTime2
+        def.waitAtBottom2 = origDef.waitAtBottom2
+        def.riseTime2     = origDef.riseTime2
+        def.waitAtTop2    = origDef.waitAtTop2
+        def.cycleTime2    = origDef.cycleTime2
+        devOverrides = nil
+        devOverrides2 = nil
+        devOffset = nil
+        PopulateInputs(def)
+        LayoutBar(bar1, def, nil, true)
+        if def.dualLift then
+            local sd = SecDef(def)
+            LayoutBar(bar2, sd, nil, false)
+        end
+        if syncUI and syncUI.ReconfigureLift then
+            syncUI.ReconfigureLift(devLiftID)
+        end
+        statusLabel:SetText("|cffffff00Reverted|r")
+    end)
+
+    -- ── OnUpdate: animate cursors ───────────────────────────────────────────
+    p:SetScript("OnUpdate", function()
+        if not devLiftID then return end
+        local def = LIFTS[devLiftID]
+        local st = liftState[devLiftID]
+        if not def or not st or st.lastSync <= 0 then
+            bar1.cursor:Hide(); bar1.glow:Hide(); bar1.timeLabel:SetText("")
+            bar2.cursor:Hide(); bar2.glow:Hide(); bar2.timeLabel:SetText("")
+            return
+        end
+        local cyc = def.cycleTime
+        local phase1 = (GetTime() - st.lastSync) % cyc
+        bar1.cursor:Show(); bar1.glow:Show()
+        UpdateBarCursor(bar1, phase1, def, devOverrides)
+
+        if def.dualLift then
+            local sd = SecDef(def)
+            local phase2
+            if st.lastSync2 > 0 then
+                phase2 = (GetTime() - st.lastSync2) % sd.cycleTime
+            else
+                local off = devOffset or def.dualOffset or cyc / 2
+                phase2 = (phase1 + off) % sd.cycleTime
+            end
+            bar2.cursor:Show(); bar2.glow:Show()
+            UpdateBarCursor(bar2, phase2, sd, devOverrides2)
+            offsetInfo:SetText(string.format("phase2 = %.2fs", phase2))
+        end
+    end)
+
+    p:Hide()
+    return p
+end
 
 -- ─── Log panel ──────────────────────────────────────────────────────────────
 
@@ -2634,6 +3303,7 @@ SlashCmdList["ALDORTAX"] = function(msg)
     elseif msg == "reset" then
         if activeLiftID then
             liftState[activeLiftID].lastSync = 0
+            liftState[activeLiftID].lastSync2 = 0
             liftState[activeLiftID].lastSyncSource = nil
         end
         warnFrame:Hide()
@@ -2729,6 +3399,12 @@ SlashCmdList["ALDORTAX"] = function(msg)
                     seg.label, seg.data.n, seg.data.meanCorr, seg.data.stdCorr, bias))
             end
         end
+    elseif msg:sub(1, 8) == "devpanel" then
+        local arg = msg:sub(10)
+        if not devPanel then devPanel = BuildDevPanel() end
+        local liftID = (arg ~= "") and arg or (activeLiftID or "aldor")
+        devPanel.ConfigureLift(liftID)
+        if devPanel:IsShown() then devPanel:Hide() else devPanel:Show() end
     elseif msg == "dev" then
         if devTimerFrame:IsShown() then
             devTimerFrame:Hide()
@@ -2749,6 +3425,7 @@ SlashCmdList["ALDORTAX"] = function(msg)
         print("  /atax testmsg       — whisper yourself to test addon messaging")
         print("  /atax unblock Name-Realm  — remove from blocklist")
         print("  /atax timing [lift] — show timing diagnostics (drift, segment bias)")
+        print("  /atax devpanel [lift] — segment tuning panel (live bars, edit times)")
         print("  /atax dev           — toggle dev timer overlay (for video calibration)")
     else
         print("|cffff0000AldorTax: Unknown command '" .. msg .. "'. Type /atax help for options.|r")
