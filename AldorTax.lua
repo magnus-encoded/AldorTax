@@ -568,39 +568,17 @@ local function JoinSyncChannel()
         syncChanNum = existing
         return
     end
-    -- Find the highest occupied channel number so we can land after it.
-    -- WoW assigns the lowest free number, so fill any gaps with temporary
-    -- placeholder channels, join ours (gets highest+1), then leave the fillers.
-    local maxChan = 0
-    for i = 1, 20 do
-        local id, name = GetChannelName(i)
-        if id and id > 0 and name and name ~= "" then
-            maxChan = i
-        end
-    end
-    -- If no channels exist yet (e.g. very early load), defer
-    if maxChan == 0 then
-        Log("|cffffff00AldorTax: no channels established yet — deferring sync channel join|r")
+    -- Don't join until General has claimed channel 1.  If it hasn't,
+    -- we'd steal that slot.  The caller will retry later.
+    local id1, name1 = GetChannelName(1)
+    if not id1 or id1 == 0 or not name1 or name1 == "" then
+        Log("|cffffff00AldorTax: waiting for General channel before joining sync channel|r")
         return
     end
-    -- Fill gaps below maxChan so our channel doesn't land in one
-    local fillers = {}
-    for i = 1, maxChan do
-        local id = GetChannelName(i)
-        if not id or id == 0 then
-            local fName = "ATFill" .. i
-            pcall(JoinChannelByName, fName)
-            fillers[#fillers + 1] = fName
-        end
-    end
-    -- Now join the real channel — it lands at maxChan+1
     local ok, err = pcall(JoinChannelByName, SYNC_CHANNEL)
     if not ok then
         Log(string.format("|cffffff00AldorTax: JoinChannelByName failed: %s|r", tostring(err)))
-    end
-    -- Leave the filler channels
-    for _, fName in ipairs(fillers) do
-        pcall(LeaveChannelByName, fName)
+        return
     end
     -- Poll until the channel is confirmed
     local waited = 0
