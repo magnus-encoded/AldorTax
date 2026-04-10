@@ -568,11 +568,15 @@ local function JoinSyncChannel()
         syncChanNum = existing
         return
     end
-    -- Don't join until General has claimed channel 1.  If it hasn't,
-    -- we'd steal that slot.  The caller will retry later.
-    local id1, name1 = GetChannelName(1)
-    if not id1 or id1 == 0 or not name1 or name1 == "" then
-        Log("|cffffff00AldorTax: waiting for General channel before joining sync channel|r")
+    -- Don't join until at least one system channel exists, so the client
+    -- has finished setting up defaults and we won't steal a low slot.
+    local hasAny = false
+    for i = 1, 10 do
+        local id = GetChannelName(i)
+        if id and id > 0 then hasAny = true; break end
+    end
+    if not hasAny then
+        Log("|cffffff00AldorTax: no channels established yet — deferring sync channel join|r")
         return
     end
     local ok, err = pcall(JoinChannelByName, SYNC_CHANNEL)
