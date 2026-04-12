@@ -198,18 +198,17 @@ assert_eq(AldorTaxDB.lifts.aldor.lastSyncRealTime, preRT,
     "future version message ignored (DB unchanged)")
 
 
--- ─── Test 8: Self-sync rejected by default ──────────────────────────────────
--- By default, settings.acceptSelfSync = false, so messages from self are ignored.
+-- ─── Test 8: Self-sync always rejected (own echoes from guild/General) ───────
 
-section("Test 8: Self-sync rejected by default")
+section("Test 8: Self-sync always rejected")
 
 local preSelfRT = AldorTaxDB.lifts.aldor.lastSyncRealTime
 local selfMsg = string.format("S|5|aldor|%.3f|TestPlayer|TestRealm|6.500|4.700|7.800|6.000|C|%.3f",
     srvPhase + 3.0, srvPhase + 3.0)
-MockAPI.ReceiveAddonMessage("ALDORTAX", selfMsg, "CHANNEL", "TestPlayer")
+MockAPI.ReceiveAddonMessage("ALDORTAX", selfMsg, "GUILD", "TestPlayer")
 
 assert_eq(AldorTaxDB.lifts.aldor.lastSyncRealTime, preSelfRT,
-    "self-sync rejected when acceptSelfSync=false")
+    "self-sync rejected (echo from guild)")
 
 
 -- ─── Test 9: CTL fallback when ChatThrottleLib unavailable ──────────────────

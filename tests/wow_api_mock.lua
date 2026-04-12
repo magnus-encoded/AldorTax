@@ -199,6 +199,7 @@ end
 function GetChannelName(name) return 1, name end
 function JoinChannelByName(name) return 1, name end
 function LeaveChannelByName(name) end
+function EnumerateServerChannels() return "General", "Trade", "LocalDefense" end
 
 function MockAPI.GetSentMessages() return _sentMessages end
 function MockAPI.ClearSentMessages() _sentMessages = {} end
@@ -219,6 +220,7 @@ function UnitName(unit)
 end
 function UnitExists(unit) return unit == "player" end
 function UnitInRaid(unit) return false end
+function IsInGuild() return false end
 function GetRealmName() return "TestRealm" end
 function GetZoneText() return _zone end
 function GetSubZoneText() return _subZone end
@@ -231,6 +233,13 @@ function SendChatMessage(msg, chatType, lang, channel) end
 function GetCursorPosition() return 0, 0 end
 function GetBuildInfo() return "2.5.5", "45745", "Mar 1 2026", 20505 end
 function CombatLogGetCurrentEventInfo() return 0, "NONE" end
+function IsFalling() return false end
+function UnitClass(unit) return "Mage", "MAGE" end
+function IsUsableSpell(spell) return true, false end
+function GetItemCount(id) return 20 end
+function GetSpellCooldown(spell) return 0, 0 end
+function GetSpellTexture(spell) return "Interface\\Icons\\Spell_Nature_Lightning" end
+function GetItemInfo(id) return "Item"..id, nil, nil, nil, nil, nil, nil, nil, nil, "Interface\\Icons\\INV_Misc_QuestionMark" end
 
 function MockAPI.SetZone(zone, subzone)
     _zone    = zone

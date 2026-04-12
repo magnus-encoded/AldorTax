@@ -10,7 +10,7 @@ warnText:SetScale(2)
 
 -- ─── Dev-mode timer overlay ──────────────────────────────────────────────────
 
-local devTimerStart = nil   -- GetTime() when dev mode was last enabled
+local devTimerStart = nil -- GetTime() when dev mode was last enabled
 
 local devTimerFrame = CreateFrame("Frame", "AldorTaxDevTimer", UIParent, "BackdropTemplate")
 devTimerFrame:SetSize(160, 36)
@@ -21,7 +21,7 @@ devTimerFrame:SetMovable(true)
 devTimerFrame:EnableMouse(true)
 devTimerFrame:RegisterForDrag("LeftButton")
 devTimerFrame:SetScript("OnDragStart", devTimerFrame.StartMoving)
-devTimerFrame:SetScript("OnDragStop",  devTimerFrame.StopMovingOrSizing)
+devTimerFrame:SetScript("OnDragStop", devTimerFrame.StopMovingOrSizing)
 devTimerFrame:Hide()
 
 local devTimerText = devTimerFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -41,42 +41,69 @@ end)
 
 local LIFTS = {
     aldor = {
-        id           = "aldor",
-        displayName  = "Aldor Lift",
-        settingsKey  = "enableAldor",
-        fallTime     = 6.5,
-        riseTime     = 7.8,
-        waitAtTop    = 6.0,
-        waitAtBottom = 4.7,
-        cycleTime    = 25.0,
-        epochOffset  = 14.1,   -- measured from timing samples; stable across sessions
-        mapX         = 0.4169,
-        mapY         = 0.3860,
-        mapScale     = 1200,   -- approximate zone width in yards
-        nearYards    = 50,
+        -- in Shattrath City, coords 32.6, 62.6
+        id               = "aldor",
+        displayName      = "Aldor Lift",
+        settingsKey      = "enableAldor",
+        fallTime         = 6.5,
+        riseTime         = 7.8,
+        waitAtTop        = 6.0,
+        waitAtBottom     = 4.7,
+        cycleTime        = 25.0,
+        epochOffset      = 14.1, -- measured from timing samples; stable across sessions
+        mapX             = 0.4169,
+        mapY             = 0.3860,
+        mapScale         = 1200, -- approximate zone width in yards
+        nearYards        = 50,
         zones            = { ["Shattrath City"] = true },
         nearSubzones     = { ["Aldor Rise"] = true },
         approachSubzones = { ["Terrace of Light"] = true },
         deathZones       = { ["Shattrath City"] = true },
-        segColors    = {
+        segColors        = {
             { r = 0.85, g = 0.12, b = 0.10 },
             { r = 0.22, g = 0.42, b = 0.88 },
             { r = 0.95, g = 0.72, b = 0.08 },
             { r = 0.10, g = 0.78, b = 0.25 },
         },
     },
+    stormspire = {
+        id               = "stormspire",
+        displayName      = "Stormspire Lift",
+        settingsKey      = "enableStormspire",
+        fallTime         = 6.5,
+        riseTime         = 7.8,
+        waitAtTop        = 6.0,
+        waitAtBottom     = 4.7,
+        cycleTime        = 25.0,
+        epochOffset      = 14.1,
+        mapX             = 0.426,
+        mapY             = 0.336,
+        mapScale         = 1200,
+        nearYards        = 50,
+        zones            = { ["Netherstorm"] = true },
+        nearSubzones     = { ["The Stormspire"] = true },
+        approachSubzones = { ["The Stormspire"] = true },
+        deathZones       = { ["The Stormspire"] = true },
+        segColors        = {
+            { r = 0.70, g = 0.15, b = 0.65 },  -- falling: purple
+            { r = 0.40, g = 0.20, b = 0.70 },  -- bottom: deep violet
+            { r = 0.80, g = 0.45, b = 0.90 },  -- rising: lavender
+            { r = 0.50, g = 0.30, b = 0.80 },  -- top: indigo
+        },
+    },
     deepruntram = {
         id           = "deepruntram",
         displayName  = "Deeprun Tram",
         settingsKey  = "enableTram",
-        fallTime     = 58.5,     -- travel IF -> SW
-        waitAtBottom = 13.0,     -- dwell at SW
-        riseTime     = 58.5,     -- travel SW -> IF
-        waitAtTop    = 13.0,     -- dwell at IF
+        fallTime     = 58.5, -- travel IF -> SW
+        waitAtBottom = 13.0, -- dwell at SW
+        riseTime     = 58.5, -- travel SW -> IF
+        waitAtTop    = 13.0, -- dwell at IF
         cycleTime    = 143.0,
-        mapX         = 0, mapY = 0,
+        mapX         = 0,
+        mapY         = 0,
         mapScale     = 1,
-        nearYards    = 999,      -- subzone detection only
+        nearYards    = 999, -- subzone detection only
         zones        = { ["Deeprun Tram"] = true },
         nearSubzones = { ["Deeprun Tram"] = true },
         deathZones   = nil,
@@ -86,33 +113,35 @@ local LIFTS = {
         endpointB    = "SW",
         phaseNames   = { "TO SW", "AT SW", "TO IF", "AT IF" },
         segColors    = {
-            { r = 0.75, g = 0.45, b = 0.20 },  -- traveling to SW (orange = destination)
-            { r = 0.65, g = 0.55, b = 0.55 },  -- waiting at SW (warm gray)
-            { r = 0.20, g = 0.45, b = 0.75 },  -- traveling to IF (blue = destination)
-            { r = 0.55, g = 0.55, b = 0.65 },  -- waiting at IF (cool gray)
+            { r = 0.75, g = 0.45, b = 0.20 }, -- traveling to SW (orange = destination)
+            { r = 0.65, g = 0.55, b = 0.55 }, -- waiting at SW (warm gray)
+            { r = 0.20, g = 0.45, b = 0.75 }, -- traveling to IF (blue = destination)
+            { r = 0.55, g = 0.55, b = 0.65 }, -- waiting at IF (cool gray)
         },
     },
     greatlift = {
-        id           = "greatlift",
-        displayName  = "Great Lift",
-        settingsKey  = "enableGreatLift",
-        fallTime     = 9.80,
-        riseTime     = 9.70,
-        waitAtTop    = 5.20,
+        id = "greatlift",
+        displayName = "Great Lift",
+        settingsKey = "enableGreatLift",
+        fallTime = 9.80,
+        riseTime = 9.70,
+        waitAtTop = 5.20,
         waitAtBottom = 5.10,
-        cycleTime    = 29.80,
-        mapX         = 0.3222,  -- midpoint of east/west for general proximity
-        mapY         = 0.2407,
-        mapScale     = 1000,
-        nearYards    = 60,
-        coordZone    = "Thousand Needles",
-        zones        = { ["Thousand Needles"] = true, ["The Barrens"] = true },
+        cycleTime = 29.80,
+        mapX = 0.3222, -- midpoint of east/west for general proximity
+        mapY = 0.2407,
+        mapScale = 1000,
+        nearYards = 60,
+        coordZone = "Thousand Needles",
+        zones = { ["Thousand Needles"] = true, ["The Barrens"] = true },
         nearSubzones = { ["The Great Lift"] = true, ["Freewind Post"] = true },
-        deathZones   = { ["Thousand Needles"] = true },
-        dualLift     = true,   -- two complementary platforms, offset by half a cycle
-        eastX        = 0.3222, eastY = 0.2407,  -- east platform coords
-        westX        = 0.3169, westY = 0.2381,  -- west platform coords
-        segColors    = {
+        deathZones = { ["Thousand Needles"] = true },
+        dualLift = true, -- two complementary platforms, offset by half a cycle
+        eastX = 0.3222,
+        eastY = 0.2407,  -- east platform coords
+        westX = 0.3169,
+        westY = 0.2381,  -- west platform coords
+        segColors = {
             { r = 0.55, g = 0.20, b = 0.18 },
             { r = 0.22, g = 0.35, b = 0.55 },
             { r = 0.60, g = 0.50, b = 0.18 },
@@ -120,28 +149,29 @@ local LIFTS = {
         },
     },
     tblift = {
-        id           = "tblift",
-        displayName  = "TB Lift",
-        settingsKey  = "enableTBLift",
-        fallTime     = 9.50,
-        riseTime     = 9.50,
-        waitAtTop    = 5.50,
-        waitAtBottom = 5.50,
-        cycleTime    = 30.00,
-        epochOffset  = 25.5,   -- measured from timing samples
-        mapX         = 0.318, mapY = 0.626,
-        mapScale     = 1000,
-        nearYards    = 80,
-        coordZone    = "Thunder Bluff",
-        zones        = { ["Thunder Bluff"] = true, ["Mulgore"] = true },
-        nearSubzones = { ["Thunder Bluff"] = true },
-        deathZones   = { ["Thunder Bluff"] = true, ["Mulgore"] = true },
-        dualLift     = true,
-        dualOffset   = -3.7,    -- North leads South by 3.7s
-        barLabel1    = "South",
-        barLabel2    = "North",
+        id            = "tblift",
+        displayName   = "TB Lift",
+        settingsKey   = "enableTBLift",
+        fallTime      = 9.50,
+        riseTime      = 9.50,
+        waitAtTop     = 5.50,
+        waitAtBottom  = 5.50,
+        cycleTime     = 30.00,
+        epochOffset   = 25.5, -- measured from timing samples
+        mapX          = 0.318,
+        mapY          = 0.626,
+        mapScale      = 1000,
+        nearYards     = 80,
+        coordZone     = "Thunder Bluff",
+        zones         = { ["Thunder Bluff"] = true, ["Mulgore"] = true },
+        nearSubzones  = { ["Thunder Bluff"] = true },
+        deathZones    = { ["Thunder Bluff"] = true, ["Mulgore"] = true },
+        dualLift      = true,
+        dualOffset    = -3.7, -- North leads South by 3.7s
+        barLabel1     = "South",
+        barLabel2     = "North",
         dualBgTexture = "Interface\\AddOns\\AldorTax\\tblift_south",
-        segColors    = {
+        segColors     = {
             { r = 0.65, g = 0.35, b = 0.15 },
             { r = 0.30, g = 0.35, b = 0.60 },
             { r = 0.70, g = 0.55, b = 0.12 },
@@ -159,6 +189,183 @@ do
     end
 end
 
+-- ─── Fall-save spells ───────────────────────────────────────────────────────
+-- Per-class abilities that can prevent fall death.  Ordered by priority:
+--   free instant casts > cheap reagent casts > gold-cost consumables.
+-- reagent = item ID required before Cata (nil if none).
+-- item    = consumable item to use (checked via GetItemCount).
+
+local NOGGENFOGGER = { item = 8529, spell = "Noggenfogger Elixir" }  -- last resort (costs gold, random effect)
+
+do
+    local _, _, _, tocVersion = GetBuildInfo()
+    local preCata = not tocVersion or tocVersion < 40000  -- Light Feather required before 4.0
+
+    -- minToc: minimum interface version for the spell to be a valid fall save.
+    -- Spells below this version are filtered out after the table is built.
+    local allSaves = {
+        MAGE = {
+            { spell = "Slow Fall",  reagent = preCata and 17056 or nil },
+            { spell = "Blink" },
+            NOGGENFOGGER,
+        },
+        PRIEST = {
+            { spell = "Levitate",   reagent = preCata and 17056 or nil },
+            NOGGENFOGGER,
+        },
+        PALADIN = {
+            { spell = "Divine Shield" },
+            { spell = "Blessing of Protection" },
+            NOGGENFOGGER,
+        },
+        HUNTER = {
+            { spell = "Disengage", minToc = 30000 }, -- resets fall in WotLK+; melee-only in TBC
+            NOGGENFOGGER,
+        },
+        WARRIOR = {
+            { spell = "Heroic Leap", minToc = 40000 }, -- Cata+
+            NOGGENFOGGER,
+        },
+        DEMONHUNTER = {
+            { spell = "Glide" },
+            { spell = "Fel Rush" },
+        },
+        MONK = {
+            { spell = "Zen Flight" },
+            { spell = "Roll" },
+            NOGGENFOGGER,
+        },
+        EVOKER = {
+            { spell = "Hover" },
+        },
+        DRUID = {
+            { spell = "Cat Form" },          -- passive fall damage reduction
+            NOGGENFOGGER,
+        },
+        -- Classes with no mitigation get Noggenfogger as sole option
+        ROGUE   = { NOGGENFOGGER },
+        WARLOCK = { NOGGENFOGGER },
+        SHAMAN  = { NOGGENFOGGER },
+        DEATHKNIGHT = { NOGGENFOGGER },
+    }
+
+    -- Strip saves that don't exist in this client version
+    FALL_SAVES = {}
+    for class, list in pairs(allSaves) do
+        local filtered = {}
+        for _, entry in ipairs(list) do
+            if not entry.minToc or (tocVersion and tocVersion >= entry.minToc) then
+                filtered[#filtered + 1] = entry
+            end
+        end
+        FALL_SAVES[class] = filtered
+    end
+end
+
+-- ── Fall-save alert frame ───────────────────────────────────────────────────
+-- A SecureActionButton so the player can click to cast.  Attributes are set
+-- outside combat (falling off a lift ≠ combat) before the frame is shown.
+
+local fallSaveFrame = CreateFrame("Button", "AldorTaxFallSave", UIParent, "SecureActionButtonTemplate")
+fallSaveFrame:SetSize(260, 52)
+fallSaveFrame:SetPoint("CENTER", 0, 100)
+fallSaveFrame:SetFrameStrata("DIALOG")
+fallSaveFrame:Hide()
+fallSaveFrame:RegisterForClicks("LeftButtonUp")
+
+do  -- backdrop
+    local bg = fallSaveFrame:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0, 0, 0, 0.75)
+end
+
+local fallSaveIcon = fallSaveFrame:CreateTexture(nil, "ARTWORK")
+fallSaveIcon:SetSize(36, 36)
+fallSaveIcon:SetPoint("LEFT", 8, 0)
+
+local fallSaveText = fallSaveFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+fallSaveText:SetPoint("LEFT", fallSaveIcon, "RIGHT", 10, 0)
+fallSaveText:SetTextColor(1, 0.3, 0.1)
+
+local fallSaveNoSpell = fallSaveFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+fallSaveNoSpell:SetPoint("CENTER")
+fallSaveNoSpell:SetTextColor(1, 0, 0)
+
+local fallSaveShown     = false   -- true while the alert is visible
+local fallSaveHideAt    = 0       -- GetTime() when we auto-dismiss
+local wasFalling        = false   -- edge detection for IsFalling()
+
+-- Find the best usable fall-save for the player's class.
+-- Returns name, texture, actionType ("spell" or "item")  or  nil, nil, nil
+local function FindBestFallSave()
+    local _, classToken = UnitClass("player")
+    local saves = FALL_SAVES[classToken]
+    if not saves then return nil, nil, nil end
+
+    for _, entry in ipairs(saves) do
+        if entry.item then
+            -- Consumable item (e.g. Noggenfogger Elixir)
+            if GetItemCount(entry.item) > 0 then
+                local name, _, _, _, _, _, _, _, _, tex = GetItemInfo(entry.item)
+                if name then
+                    return name, tex, "item"
+                end
+            end
+        else
+            -- Learned spell
+            local usable = IsUsableSpell(entry.spell)
+            if usable then
+                if entry.reagent and GetItemCount(entry.reagent) == 0 then
+                    -- skip: no reagents
+                else
+                    local start, dur = GetSpellCooldown(entry.spell)
+                    local remaining = (start and dur and start > 0) and (start + dur - GetTime()) or 0
+                    if remaining <= 0 then
+                        local tex = GetSpellTexture(entry.spell)
+                        return entry.spell, tex, "spell"
+                    end
+                end
+            end
+        end
+    end
+    return nil, nil, nil
+end
+
+local function ShowFallSaveAlert()
+    local name, tex, actionType = FindBestFallSave()
+    if name then
+        fallSaveIcon:SetTexture(tex)
+        fallSaveIcon:Show()
+        fallSaveText:SetText(name)
+        fallSaveText:Show()
+        fallSaveNoSpell:Hide()
+        if not InCombatLockdown() then
+            fallSaveFrame:SetAttribute("type", actionType)
+            fallSaveFrame:SetAttribute(actionType, name)
+        end
+    else
+        -- No save available — show a plain warning
+        fallSaveIcon:Hide()
+        fallSaveText:Hide()
+        fallSaveNoSpell:SetText("FALLING!")
+        fallSaveNoSpell:Show()
+        if not InCombatLockdown() then
+            fallSaveFrame:SetAttribute("type", nil)
+        end
+    end
+    fallSaveFrame:SetAlpha(1)
+    fallSaveFrame:Show()
+    fallSaveShown = true
+    fallSaveHideAt = GetTime() + 4
+end
+
+local function HideFallSaveAlert()
+    if fallSaveShown then
+        fallSaveFrame:Hide()
+        fallSaveShown = false
+    end
+end
+
 -- ─── Shared config ───────────────────────────────────────────────────────────
 
 local APPROACH_WARNING_TIME = 10.0
@@ -166,20 +373,19 @@ local CLICK_REACTION_TIME   = 0.2
 
 local ADDON_PREFIX          = "ALDORTAX"
 local MSG_VERSION           = 5
-local SYNC_CHANNEL          = "AldorTaxSync"
 local SOFT_BLOCK_THRESHOLD  = 3
 local HARD_BLOCK_THRESHOLD  = 6
 
 -- ─── Per-lift state ──────────────────────────────────────────────────────────
 
-local liftState = {}
+local liftState             = {}
 
 local function InitLiftState(id)
     liftState[id] = {
         lastSync          = 0,
-        lastSync2         = 0,     -- independent sync for secondary platform (dual lifts)
+        lastSync2         = 0,   -- independent sync for secondary platform (dual lifts)
         lastSyncSource    = nil,
-        syncOrigin        = nil,   -- "C" = calibrated first-hand, "R" = relayed
+        syncOrigin        = nil, -- "C" = calibrated first-hand, "R" = relayed
         lastAutoBroadcast = 0,
         lastSayTime       = 0,
         isNearLift        = nil,
@@ -188,43 +394,44 @@ end
 
 for id in pairs(LIFTS) do InitLiftState(id) end
 
-local activeLiftID = nil   -- which lift the player is currently near
+local activeLiftID             = nil -- which lift the player is currently near
 
 -- ─── Shared state ────────────────────────────────────────────────────────────
 
-local realTimeOffset   = nil
-local serverTimeOffset = nil   -- GetServerTime() - GetTime(), calibrated once at login
-local syncChanNum      = 0
-local AUTO_BROADCAST_INTERVAL = 45
-local ZONE_SEND_COOLDOWN      = 5     -- seconds after zoning before we send addon messages
-local zonedInAt               = 0     -- GetTime() when we last zoned into a lift area
-local lastProximityCheck = 0
+local realTimeOffset           = nil
+local serverTimeOffset         = nil -- GetServerTime() - GetTime(), calibrated once at login
+local AUTO_BROADCAST_INTERVAL  = 45
+local ZONE_SEND_COOLDOWN       = 5 -- seconds after zoning before we send addon messages
+local zonedInAt                = 0 -- GetTime() when we last zoned into a lift area
+local lastProximityCheck       = 0
 local PROXIMITY_CHECK_INTERVAL = 1.0
 
 -- User settings (persisted in AldorTaxDB.settings)
-local settings = {
-    syncParty    = true,
-    syncChannel  = true,
-    debugChannel = false,
-    verbose      = false,
-    segmentInput = false,
-    autoThank    = true,
-    alwaysShowUI = false,
-    alwaysCompact = false,
-    enableAldor = true,
+local settings                 = {
+    syncParty       = true,
+    syncGeneral     = true,
+    syncGuild       = true,
+    debugChannel    = false,
+    verbose         = false,
+    segmentInput    = false,
+    autoThank       = true,
+    alwaysShowUI    = false,
+    alwaysCompact   = false,
+    enableAldor     = true,
     enableGreatLift = true,
-    enableTram = false,
-    enableTBLift = false,
-    acceptSelfSync = false,
+    enableTram      = false,
+    enableTBLift    = false,
+    enableStormspire = false,
+    fallSaveAlert   = false,
 }
 
-local BuildOptionsPanel   -- forward declaration
+local BuildOptionsPanel -- forward declaration
 
 -- ─── Copyable log ─────────────────────────────────────────────────────────────
 
-local LOG_MAX  = 500
-local logLines = {}
-local logEB    = nil
+local LOG_MAX                  = 500
+local logLines                 = {}
+local logEB                    = nil
 
 local function Log(msg)
     if settings.verbose then print(msg) end
@@ -304,11 +511,11 @@ local function CheckNearLiftCoords(def)
         local dyE = py - def.eastY
         local dxW = px - def.westX
         local dyW = py - def.westY
-        return math.min((dxE*dxE + dyE*dyE)^0.5, (dxW*dxW + dyW*dyW)^0.5) <= nearFrac
+        return math.min((dxE * dxE + dyE * dyE) ^ 0.5, (dxW * dxW + dyW * dyW) ^ 0.5) <= nearFrac
     end
     local dx = px - def.mapX
     local dy = py - def.mapY
-    return (dx*dx + dy*dy)^0.5 <= nearFrac
+    return (dx * dx + dy * dy) ^ 0.5 <= nearFrac
 end
 
 local function CheckNearLift(def)
@@ -414,15 +621,15 @@ local function AnalyzeTiming(liftID)
     -- Unwrap: offset_i = ((raw - meanEpoch + half) % cycle) - half + meanEpoch
     local half = cycle / 2
     local sumT, sumY, sumTY, sumT2 = 0, 0, 0, 0
-    local t0 = samples[1][1]  -- reference time for numerical stability
+    local t0 = samples[1][1] -- reference time for numerical stability
     for i = 1, n do
-        local t = samples[i][1] - t0
-        local raw = samples[i][2]
+        local t         = samples[i][1] - t0
+        local raw       = samples[i][2]
         local unwrapped = ((raw - meanEpoch + half) % cycle) - half + meanEpoch
-        sumT  = sumT + t
-        sumY  = sumY + unwrapped
-        sumTY = sumTY + t * unwrapped
-        sumT2 = sumT2 + t * t
+        sumT            = sumT + t
+        sumY            = sumY + unwrapped
+        sumTY           = sumTY + t * unwrapped
+        sumT2           = sumT2 + t * t
     end
     local denom = n * sumT2 - sumT * sumT
     local driftPerSec = (denom ~= 0) and (n * sumTY - sumT * sumY) / denom or 0
@@ -435,7 +642,7 @@ local function AnalyzeTiming(liftID)
     for i = 1, n do
         local corr = samples[i][3]
         local label = samples[i][4]
-        if corr ~= 0 or label then  -- skip samples without a correction (first click)
+        if corr ~= 0 or label then -- skip samples without a correction (first click)
             local key = label or "?"
             if not segData[key] then segData[key] = { n = 0, sum = 0, sumSq = 0 } end
             local s = segData[key]
@@ -454,9 +661,12 @@ local function AnalyzeTiming(liftID)
     local timeSpan = samples[n][1] - samples[1][1]
 
     return {
-        n = n, timeSpan = timeSpan,
-        meanEpoch = meanEpoch, stdEpoch = stdEpoch,
-        driftPerHour = driftPerHour, impliedCycleError = impliedCycleError,
+        n = n,
+        timeSpan = timeSpan,
+        meanEpoch = meanEpoch,
+        stdEpoch = stdEpoch,
+        driftPerHour = driftPerHour,
+        impliedCycleError = impliedCycleError,
         segments = segments,
     }
 end
@@ -530,8 +740,8 @@ local function IsHardBlocked(name, realm) return GetDeathCount(name, realm) >= H
 local function RecordDeathReport(name, realm)
     if not AldorTaxDB then return end
     if not AldorTaxDB.blocklist then AldorTaxDB.blocklist = {} end
-    local key   = BlockKey(name, realm)
-    local count = (AldorTaxDB.blocklist[key] or 0) + 1
+    local key                 = BlockKey(name, realm)
+    local count               = (AldorTaxDB.blocklist[key] or 0) + 1
     AldorTaxDB.blocklist[key] = count
     if count == SOFT_BLOCK_THRESHOLD then
         print(string.format("|cffff6600AldorTax: %s has %d death reports — syncs ignored.|r", key, count))
@@ -556,56 +766,24 @@ local function RegisterPrefix()
     if prefixRegistered then
         Log("|cff00ff00AldorTax: prefix registered OK (ok=" .. tostring(ok) .. ").|r")
     else
-        Log("|cffffff00AldorTax: prefix registration returned " .. tostring(ok) .. " — will attempt messaging regardless.|r")
+        Log("|cffffff00AldorTax: prefix registration returned " ..
+            tostring(ok) .. " — will attempt messaging regardless.|r")
         prefixRegistered = true
     end
 end
 
-local function JoinSyncChannel()
-    -- Already in the channel?
-    local existing = GetChannelName(SYNC_CHANNEL)
-    if existing and existing > 0 then
-        syncChanNum = existing
-        return
-    end
-    -- Don't join until at least one system channel exists, so the client
-    -- has finished setting up defaults and we won't steal a low slot.
-    local hasAny = false
-    for i = 1, 10 do
-        local id = GetChannelName(i)
-        if id and id > 0 then hasAny = true; break end
-    end
-    if not hasAny then
-        Log("|cffffff00AldorTax: no channels established yet — deferring sync channel join|r")
-        return
-    end
-    local ok, err = pcall(JoinChannelByName, SYNC_CHANNEL)
-    if not ok then
-        Log(string.format("|cffffff00AldorTax: JoinChannelByName failed: %s|r", tostring(err)))
-        return
-    end
-    -- Poll until the channel is confirmed
-    local waited = 0
-    local attempts = 0
-    local poller = CreateFrame("Frame")
-    poller:SetScript("OnUpdate", function(self, elapsed)
-        waited = waited + elapsed
-        local n = GetChannelName(SYNC_CHANNEL)
-        if n and n > 0 then
-            syncChanNum = n
-            Log(string.format("|cff888888AldorTax: joined channel %s (#%d)|r", SYNC_CHANNEL, n))
-            self:SetScript("OnUpdate", nil)
-        elseif waited > 10 then
-            attempts = attempts + 1
-            if attempts < 3 then
-                waited = 0
-                pcall(JoinChannelByName, SYNC_CHANNEL)
-            else
-                Log("|cffffff00AldorTax: sync channel unavailable — syncing via party/raid only|r")
-                self:SetScript("OnUpdate", nil)
-            end
+-- Returns the channel number for General (localized), or nil if unavailable.
+-- On Classic TBC+ General is zone-scoped, so addon messages sent here
+-- only reach players in the same zone — ideal for lift sync.
+local function GetGeneralChannelNum()
+    if EnumerateServerChannels then
+        local general = EnumerateServerChannels() -- first return is General
+        if general then
+            local num = GetChannelName(general)
+            if num and num > 0 then return num end
         end
-    end)
+    end
+    return nil
 end
 
 local function RawSend(msg, chatType, target)
@@ -613,7 +791,7 @@ local function RawSend(msg, chatType, target)
     if ChatThrottleLib then
         -- Use CTL: time-sensitive sync data goes as ALERT priority
         ok, err = pcall(ChatThrottleLib.SendAddonMessage, ChatThrottleLib,
-                        "ALERT", ADDON_PREFIX, msg, chatType, target)
+            "ALERT", ADDON_PREFIX, msg, chatType, target)
     elseif C_ChatInfo then
         ok, err = pcall(C_ChatInfo.SendAddonMessage, ADDON_PREFIX, msg, chatType, target)
     else
@@ -629,17 +807,18 @@ local lastNoChannelWarn = 0
 
 local function SendMsg(msg)
     local sent = false
-    if settings.syncChannel then
-        -- Join on first use so we never steal channel #1 from General
-        if syncChanNum == 0 then
-            JoinSyncChannel()
-        end
-        local n = GetChannelName(SYNC_CHANNEL)
-        if n and n > 0 then
-            syncChanNum = n
-            if RawSend(msg, "CHANNEL", n) then sent = true end
+    -- General channel (zone-scoped on Classic TBC+)
+    if settings.syncGeneral then
+        local generalNum = GetGeneralChannelNum()
+        if generalNum then
+            if RawSend(msg, "CHANNEL", generalNum) then sent = true end
         end
     end
+    -- Guild
+    if settings.syncGuild and IsInGuild() then
+        if RawSend(msg, "GUILD") then sent = true end
+    end
+    -- Party / Raid
     if settings.syncParty then
         if UnitInRaid("player") then
             if RawSend(msg, "RAID") then sent = true end
@@ -654,7 +833,7 @@ local function SendMsg(msg)
         local now = GetTime()
         if now - lastNoChannelWarn > 60 then
             lastNoChannelWarn = now
-            Log("|cffffff00AldorTax: no channel to send on (channel=" .. syncChanNum .. ", solo)|r")
+            Log("|cffffff00AldorTax: no channel to send on (solo)|r")
         end
     end
 end
@@ -671,19 +850,19 @@ local function BroadcastSync(liftID, realTime)
     if GetTime() - zonedInAt < ZONE_SEND_COOLDOWN then return end
     local def = LIFTS[liftID]
     if not def then return end
-    local st  = liftState[liftID]
-    local name  = UnitName("player") or "Unknown"
-    local realm = GetRealmName() or ""
-    local rt = realTime
-              or (AldorTaxDB and AldorTaxDB.lifts and AldorTaxDB.lifts[liftID]
-                  and AldorTaxDB.lifts[liftID].lastSyncRealTime)
-              or GetRealTime()
-    local phase = rt % def.cycleTime
+    local st       = liftState[liftID]
+    local name     = UnitName("player") or "Unknown"
+    local realm    = GetRealmName() or ""
+    local rt       = realTime
+        or (AldorTaxDB and AldorTaxDB.lifts and AldorTaxDB.lifts[liftID]
+            and AldorTaxDB.lifts[liftID].lastSyncRealTime)
+        or GetRealTime()
+    local phase    = rt % def.cycleTime
     -- origin: "C" if we calibrated this ourselves, "R" if relaying someone else's sync
-    local origin = (realTime or not st.lastSyncSource) and "C" or "R"
+    local origin   = (realTime or not st.lastSyncSource) and "C" or "R"
     -- Server-time phase: shared ground truth across all clients regardless of local clock
-    local absRT = realTime and (realTime - realTimeOffset + (serverTimeOffset or 0))
-                  or GetAbsoluteTime()
+    local absRT    = realTime and (realTime - realTimeOffset + (serverTimeOffset or 0))
+        or GetAbsoluteTime()
     local srvPhase = absRT % def.cycleTime
     -- v5: S|ver|liftID|phase|name|realm|fall|bottom|rise|top|origin|srvPhase
     -- phase (field 3) kept for v3/v4 compat; v5 receivers prefer srvPhase (field 11)
@@ -712,12 +891,12 @@ local function ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, t
     if not def then return end
     local st = liftState[liftID]
     local cycle_s = (fall and bottom and rise and top)
-                    and (fall + bottom + rise + top)
-                    or  def.cycleTime
+        and (fall + bottom + rise + top)
+        or def.cycleTime
     -- Compensate for network latency: the message was current when it left
     -- the sender's client, but took ~latency ms to reach us via the server
     local _, _, _, latencyWorld = GetNetStats()
-    local netDelay = (latencyWorld or 0) / 1000  -- ms → seconds
+    local netDelay = (latencyWorld or 0) / 1000 -- ms → seconds
     -- Prefer server-time phase if available (v5); fall back to local-time phase (v3/v4)
     local elapsedInCycle
     if srvPhase and serverTimeOffset then
@@ -750,7 +929,7 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
         return
     end
 
-    if isSelf and not settings.acceptSelfSync then return end
+    if isSelf then return end  -- always ignore own echoes (guild/General reflect back)
 
     Log(string.format("|cffffff00AldorTax RECV [%s] from %s: %s|r", chatType, tostring(sender), tostring(message)))
     local parts = {}
@@ -776,7 +955,7 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
             bottom   = tonumber(parts[7])
             rise     = tonumber(parts[8])
             top      = tonumber(parts[9])
-            origin   = parts[10] or "C"   -- v4 has no origin field; assume calibrated
+            origin   = parts[10] or "C"    -- v4 has no origin field; assume calibrated
             srvPhase = tonumber(parts[11]) -- v5 only; nil for v4
         elseif ver >= 3 and #parts >= 4 then
             liftID = "aldor"
@@ -805,9 +984,9 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
             Log(string.format("|cff00ff00AldorTax: %s sync from %s%s (%.2f+%.2f+%.2f+%.2f=%.2fs)|r",
                 LIFTS[liftID].displayName, name, originLabel, fall, bottom, rise, top, fall + bottom + rise + top))
         else
-            Log(string.format("|cff00ff00AldorTax: %s sync from %s-%s%s|r", LIFTS[liftID].displayName, name, realm, originLabel))
+            Log(string.format("|cff00ff00AldorTax: %s sync from %s-%s%s|r", LIFTS[liftID].displayName, name, realm,
+                originLabel))
         end
-
     elseif msgType == "D" then
         local liftID, syncTime, name, realm
         if ver >= 4 and #parts >= 5 then
@@ -862,7 +1041,7 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if not AldorTaxDB.ty then AldorTaxDB.ty = 0 end
         -- Migrate old flat sync state into per-lift structure
         if AldorTaxDB.lastSyncRealTime and not AldorTaxDB.lifts then
-            AldorTaxDB.lifts = {
+            AldorTaxDB.lifts            = {
                 aldor = {
                     lastSyncRealTime = AldorTaxDB.lastSyncRealTime,
                     lastSyncSource   = AldorTaxDB.lastSyncSource,
@@ -881,10 +1060,8 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         RegisterPrefix()
         RestoreSync()
         BuildOptionsPanel()
-
     elseif event == "CHAT_MSG_ADDON" then
         HandleAddonMessage(arg1, arg2, arg3, arg4)
-
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local _, subEvent = CombatLogGetCurrentEventInfo()
         if subEvent == "ENVIRONMENTAL_DAMAGE" then
@@ -893,7 +1070,6 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 logicFrame.lastFallDamage = GetTime()
             end
         end
-
     elseif event == "PLAYER_DEAD" then
         if activeLiftID then
             local isFallDeath = logicFrame.lastFallDamage and (GetTime() - logicFrame.lastFallDamage) < 3
@@ -908,7 +1084,6 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 Log("|cffffcc00AldorTax: Non-fall death near lift — sync preserved.|r")
             end
         end
-
     elseif event == "CHAT_MSG_TEXT_EMOTE" then
         -- Secret thank counter: only if we /say'd recently, not self, they targeted us
         local st = activeLiftID and liftState[activeLiftID]
@@ -927,31 +1102,26 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 end
             end
         end
-
     elseif event == "CHAT_MSG_SAY" then
         local msg    = arg1 or ""
         local sender = arg2 or ""
-        local me = UnitName("player")
+        local me     = UnitName("player")
         if settings.autoThank and sender ~= me and not sender:find("^" .. me .. "%-") and msg:find("^AldorTax:.*lift going down in:") then
             DoEmote("THANK", sender)
         end
-
     elseif event == "ZONE_CHANGED" or event == "ZONE_CHANGED_INDOORS" or event == "ZONE_CHANGED_NEW_AREA" then
         local newLiftID = DetectActiveLift()
         if newLiftID then
             if newLiftID ~= activeLiftID then
                 if not activeLiftID then
-                    zonedInAt = GetTime()  -- entering a lift zone; delay sends for server rate-limiter
-                    if syncChanNum == 0 and settings.syncChannel then
-                        JoinSyncChannel()
-                    end
+                    zonedInAt = GetTime() -- entering a lift zone; delay sends for server rate-limiter
                 end
                 activeLiftID = newLiftID
                 if not syncUI then syncUI = BuildSyncUI() end
                 syncUI.ReconfigureLift(activeLiftID)
             end
-            local def = LIFTS[activeLiftID]
-            local st  = liftState[activeLiftID]
+            local def        = LIFTS[activeLiftID]
+            local st         = liftState[activeLiftID]
             st.isNearLift    = CheckNearLift(def)
             st.isApproaching = CheckApproachLift(def)
             if settings.alwaysCompact then
@@ -1004,11 +1174,15 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         st.isNearLift    = CheckNearLift(def)
         st.isApproaching = CheckApproachLift(def)
         if settings.alwaysCompact then
-            if not syncUI then syncUI = BuildSyncUI(); syncUI.ReconfigureLift(activeLiftID) end
+            if not syncUI then
+                syncUI = BuildSyncUI(); syncUI.ReconfigureLift(activeLiftID)
+            end
             syncUI.SetCompact(true)
             if not syncUI:IsShown() then syncUI:Show() end
         elseif settings.alwaysShowUI then
-            if not syncUI then syncUI = BuildSyncUI(); syncUI.ReconfigureLift(activeLiftID) end
+            if not syncUI then
+                syncUI = BuildSyncUI(); syncUI.ReconfigureLift(activeLiftID)
+            end
             syncUI.SetCompact(false)
             if not syncUI:IsShown() then syncUI:Show() end
         elseif syncUI then
@@ -1037,7 +1211,7 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         local progress          = (GetTime() - st.lastSync) % def.cycleTime
         local timeUntilNextDrop = def.cycleTime - progress
 
-        local uiVisible = (syncUI and syncUI:IsShown()) or settings.alwaysShowUI
+        local uiVisible         = (syncUI and syncUI:IsShown()) or settings.alwaysShowUI
         if uiVisible then
             warnFrame:Hide()
         elseif status == "on_platform" and timeUntilNextDrop <= def.waitAtTop then
@@ -1045,7 +1219,6 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
             warnText:SetText(string.format("!!! LEAVING IN: %.1fs !!!", timeUntilNextDrop))
             warnText:SetTextColor(1, 0, 0)
             warnFrame:SetAlpha(math.abs(math.sin(GetTime() * 10)))
-
         elseif status == "approaching" and timeUntilNextDrop <= APPROACH_WARNING_TIME then
             warnFrame:Show()
             warnText:SetText(string.format("LIFT LEAVING IN: %.1fs!", timeUntilNextDrop))
@@ -1056,9 +1229,30 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         end
     end
 
+    -- Fall-save alert: detect freefall near a lift with a death zone
+    if settings.fallSaveAlert and def.deathZones then
+        local falling = IsFalling()
+        if falling and not wasFalling then
+            -- Rising edge: just started falling — only alert if near the lift
+            if st.isNearLift or st.isApproaching then
+                ShowFallSaveAlert()
+            end
+        elseif not falling and wasFalling then
+            HideFallSaveAlert()
+        end
+        wasFalling = falling
+        -- Auto-dismiss after timeout
+        if fallSaveShown and GetTime() >= fallSaveHideAt then
+            HideFallSaveAlert()
+        end
+    elseif fallSaveShown then
+        HideFallSaveAlert()
+        wasFalling = false
+    end
+
     -- Auto-broadcast
-    local chanNum = settings.syncChannel and GetChannelName(SYNC_CHANNEL) or 0
-    local hasRecipient = (chanNum and chanNum > 0)
+    local hasRecipient = (settings.syncGeneral and GetGeneralChannelNum())
+        or (settings.syncGuild and IsInGuild())
         or (settings.syncParty and (UnitInRaid("player") or (GetNumGroupMembers and GetNumGroupMembers() > 0)))
     if st.lastSync > 0 and hasRecipient then
         local now = GetTime()
@@ -1093,7 +1287,7 @@ local function PerformCalibrationClick(liftID, phaseStart, label)
     end
     st.lastSync          = now - phaseStart
     st.lastAutoBroadcast = GetTime()
-    local rt = GetRealTime() - CLICK_REACTION_TIME - phaseStart
+    local rt             = GetRealTime() - CLICK_REACTION_TIME - phaseStart
     SaveSync(liftID, nil, nil, rt)
     BroadcastSync(liftID, rt)
     AppendSyncLog(string.format(
@@ -1134,13 +1328,13 @@ end
 -- Returns the phase colour (r, g, b) for a given cycle position.
 local function GetPhaseColor(phase, def)
     if phase < def.fallTime then
-        return 0.85, 0.12, 0.10     -- falling: red
+        return 0.85, 0.12, 0.10 -- falling: red
     elseif phase < def.fallTime + def.waitAtBottom then
-        return 0.22, 0.42, 0.88     -- bottom: blue
+        return 0.22, 0.42, 0.88 -- bottom: blue
     elseif phase < def.fallTime + def.waitAtBottom + def.riseTime then
-        return 0.95, 0.72, 0.08     -- rising: yellow
+        return 0.95, 0.72, 0.08 -- rising: yellow
     else
-        return 0.10, 0.78, 0.25     -- top: green
+        return 0.10, 0.78, 0.25 -- top: green
     end
 end
 
@@ -1149,10 +1343,10 @@ end
 local function SecDef(def)
     if not def.cycleTime2 then return def end
     return {
-        fallTime     = def.fallTime2     or def.fallTime,
+        fallTime     = def.fallTime2 or def.fallTime,
         waitAtBottom = def.waitAtBottom2 or def.waitAtBottom,
-        riseTime     = def.riseTime2     or def.riseTime,
-        waitAtTop    = def.waitAtTop2    or def.waitAtTop,
+        riseTime     = def.riseTime2 or def.riseTime,
+        waitAtTop    = def.waitAtTop2 or def.waitAtTop,
         cycleTime    = def.cycleTime2,
         segColors    = def.segColors,
     }
@@ -1165,17 +1359,17 @@ BuildSyncUI = function()
     local BAR_W_COMPACT = 280
     local BAR_H         = 28
     local PAD           = 12
-    local VBAR_W        = 26     -- vertical bar width
-    local VBAR_H        = 130    -- vertical bar height
-    local VBAR_GAP      = 70     -- gap between the two vertical bars
+    local VBAR_W        = 26  -- vertical bar width
+    local VBAR_H        = 130 -- vertical bar height
+    local VBAR_GAP      = 70  -- gap between the two vertical bars
 
-    local barW      = BAR_W_FULL
-    local isCompact = false
-    local isDual    = false
-    local curLiftID = nil
+    local barW          = BAR_W_FULL
+    local isCompact     = false
+    local isDual        = false
+    local curLiftID     = nil
 
     -- ── Main frame ──────────────────────────────────────────────────────────
-    local p = CreateFrame("Frame", "AldorTaxSyncUI", UIParent, "BackdropTemplate")
+    local p             = CreateFrame("Frame", "AldorTaxSyncUI", UIParent, "BackdropTemplate")
     p:SetSize(BAR_W_FULL + PAD * 2, 94)
     if AldorTaxDB and AldorTaxDB.windowPos then
         local wp = AldorTaxDB.windowPos
@@ -1196,9 +1390,11 @@ BuildSyncUI = function()
         end
     end)
     p:SetBackdrop({
-        bgFile   = "Interface/ChatFrame/ChatFrameBackground",
+        bgFile = "Interface/ChatFrame/ChatFrameBackground",
         edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 14,
+        tile = true,
+        tileSize = 16,
+        edgeSize = 14,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
     p:SetBackdropColor(0.04, 0.04, 0.07, 0.92)
@@ -1226,9 +1422,11 @@ BuildSyncUI = function()
     barBg:SetPoint("TOPLEFT", PAD - 2, -24)
     barBg:SetSize(BAR_W_FULL + 4, BAR_H + 4)
     barBg:SetBackdrop({
-        bgFile   = "Interface/ChatFrame/ChatFrameBackground",
+        bgFile = "Interface/ChatFrame/ChatFrameBackground",
         edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-        tile = true, tileSize = 8, edgeSize = 8,
+        tile = true,
+        tileSize = 8,
+        edgeSize = 8,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
     barBg:SetBackdropColor(0.02, 0.02, 0.04, 0.90)
@@ -1271,8 +1469,12 @@ BuildSyncUI = function()
         segBtn:SetScript("OnClick", function()
             if not activeLiftID then return end
             local def = LIFTS[activeLiftID]
-            local starts = { [0] = 0, def.fallTime, def.fallTime + def.waitAtBottom,
-                             def.fallTime + def.waitAtBottom + def.riseTime }
+            local starts = {
+                [0] = 0,
+                def.fallTime,
+                def.fallTime + def.waitAtBottom,
+                def.fallTime + def.waitAtBottom + def.riseTime
+            }
             PerformCalibrationClick(activeLiftID, starts[phaseIdx], SEG_NAMES[i])
         end)
     end
@@ -1327,15 +1529,17 @@ BuildSyncUI = function()
     -- Phase segment labels for click feedback
     local VBAR_PHASE_NAMES = { "FALL", "BOTTOM", "RISE", "TOP" }
 
-    local OnBarClick  -- forward declaration; assigned after MakeVBar
+    local OnBarClick -- forward declaration; assigned after MakeVBar
 
     local function MakeVBar(parent, label, isPrimary)
         local bg = CreateFrame("Frame", nil, parent, "BackdropTemplate")
         bg:SetSize(VBAR_W + 6, VBAR_H + 6)
         bg:SetBackdrop({
-            bgFile   = "Interface/ChatFrame/ChatFrameBackground",
+            bgFile = "Interface/ChatFrame/ChatFrameBackground",
             edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-            tile = true, tileSize = 8, edgeSize = 10,
+            tile = true,
+            tileSize = 8,
+            edgeSize = 10,
             insets = { left = 2, right = 2, top = 2, bottom = 2 },
         })
         bg:SetBackdropColor(0.03, 0.03, 0.06, 0.92)
@@ -1446,9 +1650,14 @@ BuildSyncUI = function()
         tlbl:SetShadowColor(0, 0, 0, 1)
 
         return {
-            bg = bg, bar = vbar, overlay = voverlay,
-            cursor = cur, glow = glow,
-            label = lbl, timeLabel = tlbl, phaseLbl = phaseLbl,
+            bg = bg,
+            bar = vbar,
+            overlay = voverlay,
+            cursor = cur,
+            glow = glow,
+            label = lbl,
+            timeLabel = tlbl,
+            phaseLbl = phaseLbl,
             isPrimary = isPrimary,
         }
     end
@@ -1456,7 +1665,7 @@ BuildSyncUI = function()
     -- ── Dual-lift click-on-bar sync ────────────────────────────────────────
     -- Top half = "lift is at the top now", bottom half = "lift is at the bottom now".
     -- Single click is enough if the cycle timing is correct.
-    OnBarClick = function(isPrimary, clickFrac)
+    OnBarClick          = function(isPrimary, clickFrac)
         if not activeLiftID then return end
         local def = LIFTS[activeLiftID]
         local sd = isPrimary and def or SecDef(def)
@@ -1490,8 +1699,8 @@ BuildSyncUI = function()
         end
     end
 
-    local vbar1 = MakeVBar(dualContainer, "Primary", true)
-    local vbar2 = MakeVBar(dualContainer, "Secondary", false)
+    local vbar1         = MakeVBar(dualContainer, "Primary", true)
+    local vbar2         = MakeVBar(dualContainer, "Secondary", false)
 
     -- ═════════════════════════════════════════════════════════════════════════
     -- DUAL HORIZONTAL BAR ELEMENTS (tram mode: Deeprun Tram)
@@ -1510,15 +1719,19 @@ BuildSyncUI = function()
 
     local function MakeHBar(parent, label, isPrimary)
         local BTN_BD = {
-            bgFile   = "Interface/ChatFrame/ChatFrameBackground",
+            bgFile = "Interface/ChatFrame/ChatFrameBackground",
             edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-            tile = true, tileSize = 8, edgeSize = 10,
+            tile = true,
+            tileSize = 8,
+            edgeSize = 10,
             insets = { left = 2, right = 2, top = 2, bottom = 2 },
         }
         local BAR_BD = {
-            bgFile   = "Interface/ChatFrame/ChatFrameBackground",
+            bgFile = "Interface/ChatFrame/ChatFrameBackground",
             edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-            tile = true, tileSize = 8, edgeSize = 8,
+            tile = true,
+            tileSize = 8,
+            edgeSize = 8,
             insets = { left = 1, right = 1, top = 1, bottom = 1 },
         }
 
@@ -1635,7 +1848,7 @@ BuildSyncUI = function()
             if p >= def.fallTime + def.waitAtBottom + def.riseTime then
                 return "A"
             end
-            return nil  -- in transit
+            return nil -- in transit
         end
 
         clickBtn:SetScript("OnEnter", function(self)
@@ -1668,7 +1881,7 @@ BuildSyncUI = function()
                 phaseStart = 0
                 phaseName = "departs " .. (def.endpointA or "A")
             else
-                return  -- in transit or no sync — ignore click
+                return -- in transit or no sync — ignore click
             end
             if not isPrimary and def.dualLift then
                 phaseStart = (phaseStart + def.cycleTime / 2) % def.cycleTime
@@ -1677,13 +1890,22 @@ BuildSyncUI = function()
         end)
 
         return {
-            row = row, bg = bg, bar = hbar, overlay = hover,
-            cursor = cur, glow = glow,
-            fillL = fillL, fillR = fillR,
-            timeLabel = timeLbl, phaseLbl = phaseLbl,
-            isPrimary = isPrimary, label = label,
-            btnA = btnA, btnB = btnB,
-            compactLblA = compactLblA, compactLblB = compactLblB,
+            row = row,
+            bg = bg,
+            bar = hbar,
+            overlay = hover,
+            cursor = cur,
+            glow = glow,
+            fillL = fillL,
+            fillR = fillR,
+            timeLabel = timeLbl,
+            phaseLbl = phaseLbl,
+            isPrimary = isPrimary,
+            label = label,
+            btnA = btnA,
+            btnB = btnB,
+            compactLblA = compactLblA,
+            compactLblB = compactLblB,
             getDepartStation = getDepartStation,
         }
     end
@@ -1709,30 +1931,30 @@ BuildSyncUI = function()
         end
         local phase = (GetTime() - st.lastSync) % def.cycleTime
         if def.horizontal then
-            local nameA = def.endpointA or "A"  -- IF
-            local nameB = def.endpointB or "B"  -- SW
+            local nameA = def.endpointA or "A" -- IF
+            local nameB = def.endpointB or "B" -- SW
             -- Phase tracks the "North" tram. South is offset by half cycle.
             -- Show per-station info with track name so players know which platform.
             if phase < def.fallTime then
                 -- North heading to SW, South heading to IF
                 local t = def.fallTime - phase
                 return string.format("AldorTax Tram: South arrives %s in %02.0fs", nameA, t),
-                       string.format("AldorTax Tram: North arrives %s in %02.0fs", nameB, t)
+                    string.format("AldorTax Tram: North arrives %s in %02.0fs", nameB, t)
             elseif phase < def.fallTime + def.waitAtBottom then
                 -- North docked at SW, South docked at IF
                 local t = def.fallTime + def.waitAtBottom - phase
                 return string.format("AldorTax Tram: South departs %s in %02.0fs", nameA, t),
-                       string.format("AldorTax Tram: North departs %s in %02.0fs", nameB, t)
+                    string.format("AldorTax Tram: North departs %s in %02.0fs", nameB, t)
             elseif phase < def.fallTime + def.waitAtBottom + def.riseTime then
                 -- North heading to IF, South heading to SW
                 local t = def.fallTime + def.waitAtBottom + def.riseTime - phase
                 return string.format("AldorTax Tram: North arrives %s in %02.0fs", nameA, t),
-                       string.format("AldorTax Tram: South arrives %s in %02.0fs", nameB, t)
+                    string.format("AldorTax Tram: South arrives %s in %02.0fs", nameB, t)
             else
                 -- North docked at IF, South docked at SW
                 local t = def.cycleTime - phase
                 return string.format("AldorTax Tram: North departs %s in %02.0fs", nameA, t),
-                       string.format("AldorTax Tram: South departs %s in %02.0fs", nameB, t)
+                    string.format("AldorTax Tram: South departs %s in %02.0fs", nameB, t)
             end
         elseif def.dualLift then
             local sd = SecDef(def)
@@ -1843,7 +2065,7 @@ BuildSyncUI = function()
     end
 
     local function LayoutDualFull()
-        local totalW = VBAR_W * 2 + VBAR_GAP + 6 * 2  -- bars + gap + borders
+        local totalW = VBAR_W * 2 + VBAR_GAP + 6 * 2 -- bars + gap + borders
         local frameW = totalW + PAD * 2 + 40
         if frameW < 200 then frameW = 200 end
         -- title(20) + labelAbove(14) + bars + timeBelow(14) + sayBtn(24) + padding
@@ -1857,7 +2079,7 @@ BuildSyncUI = function()
         vbar1.bg:ClearAllPoints()
         vbar1.bg:SetPoint("TOP", dualContainer, "TOP", -(VBAR_GAP / 2 + VBAR_W / 2), -36)
         vbar2.bg:ClearAllPoints()
-        vbar2.bg:SetPoint("TOP", dualContainer, "TOP",  (VBAR_GAP / 2 + VBAR_W / 2), -36)
+        vbar2.bg:SetPoint("TOP", dualContainer, "TOP", (VBAR_GAP / 2 + VBAR_W / 2), -36)
 
         -- Background image fills entire container
         dualBgTex:ClearAllPoints()
@@ -1881,7 +2103,7 @@ BuildSyncUI = function()
         vbar2.bg:ClearAllPoints()
         vbar2.bg:SetPoint("LEFT", vbar1.bg, "RIGHT", VBAR_GAP - 6, 0)
 
-        dualBgTex:Hide()  -- no room in compact mode
+        dualBgTex:Hide() -- no room in compact mode
 
         sayIcon:ClearAllPoints()
         sayIcon:SetPoint("LEFT", vbar2.bg, "RIGHT", 8, 0)
@@ -1889,7 +2111,7 @@ BuildSyncUI = function()
     end
 
     local function LayoutTramFull()
-        local rowW = HBAR_W + STATION_BTN_W * 2 + 16  -- bar + 2 station buttons + gaps
+        local rowW = HBAR_W + STATION_BTN_W * 2 + 16 -- bar + 2 station buttons + gaps
         local frameW = rowW + PAD * 2
         -- title(20) + row1 + gap + row2 + portalIcons(35) + sayBtn(24) + padding
         local frameH = 20 + (HBAR_H + 6 + 12) * 2 + HBAR_GAP + 35 + 24 + PAD + 12
@@ -1942,16 +2164,16 @@ BuildSyncUI = function()
     -- fully clickable (required for calibration).  sayIcon replaces sayBtn
     -- and calls DoSayPosition() on click, same as sayBtn.
 
-    local COMPACT_HBAR_W  = 180   -- travel bar width in compact mode (full = 400)
-    local COMPACT_BTN_W   = 30    -- station button width (full = 40)
-    local COMPACT_HBAR_H  = 16    -- bar height (full = 20)
-    local COMPACT_GAP     = 4     -- gap between hbar2 and hbar1 rows
+    local COMPACT_HBAR_W = 180 -- travel bar width in compact mode (full = 400)
+    local COMPACT_BTN_W  = 30  -- station button width (full = 40)
+    local COMPACT_HBAR_H = 16  -- bar height (full = 20)
+    local COMPACT_GAP    = 4   -- gap between hbar2 and hbar1 rows
 
     local function LayoutTramCompact()
         local rowW = COMPACT_HBAR_W + COMPACT_BTN_W * 2 + 16
         local rowH = COMPACT_HBAR_H + 8
         -- Frame: two rows + gap + small top/bottom padding
-        local frameW = rowW + PAD * 2 + 28  -- +28 for sayIcon to the right
+        local frameW = rowW + PAD * 2 + 28 -- +28 for sayIcon to the right
         local frameH = rowH * 2 + COMPACT_GAP + 14
         p:SetSize(frameW, frameH)
 
@@ -1978,7 +2200,7 @@ BuildSyncUI = function()
             -- bg auto-sizes via LEFT/RIGHT anchors between btnA and btnB
             hb.bg:SetHeight(COMPACT_HBAR_H + 4)
             -- Update fill widths to match the narrower bar
-            local innerW = COMPACT_HBAR_W - 6  -- hbar inset is 3px each side
+            local innerW = COMPACT_HBAR_W - 6 -- hbar inset is 3px each side
             hb.fillL:SetWidth(innerW / 2)
             hb.fillR:SetWidth(innerW / 2)
             -- Resize cursor and glow for the shorter bar height
@@ -2040,7 +2262,7 @@ BuildSyncUI = function()
         local def = LIFTS[liftID]
         if not def then return end
         curLiftID = liftID
-        p.curLiftID = liftID  -- expose on frame for external guard
+        p.curLiftID = liftID -- expose on frame for external guard
         isDual = def.dualLift and not settings.segmentInput and true or false
         isTram = def.horizontal and true or false
         if isDual then
@@ -2064,20 +2286,22 @@ BuildSyncUI = function()
             sayBtn:SetText("|cffffcc00Say Position|r")
 
             -- Track labels (Bottom = North, Top = South)
-            hbar1.row.trackLabel = hbar1.row.trackLabel or hbar1.row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            hbar1.row.trackLabel = hbar1.row.trackLabel or
+                hbar1.row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             hbar1.row.trackLabel:SetPoint("BOTTOMLEFT", hbar1.bg, "TOPLEFT", 0, 2)
             hbar1.row.trackLabel:SetText("NORTH TRAM (closer to entrance)")
             hbar1.row.trackLabel:SetTextColor(0.7, 0.7, 0.9)
 
-            hbar2.row.trackLabel = hbar2.row.trackLabel or hbar2.row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            hbar2.row.trackLabel = hbar2.row.trackLabel or
+                hbar2.row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             hbar2.row.trackLabel:SetPoint("BOTTOMLEFT", hbar2.bg, "TOPLEFT", 0, 2)
             hbar2.row.trackLabel:SetText("SOUTH TRAM")
             hbar2.row.trackLabel:SetTextColor(0.9, 0.7, 0.7)
 
-            local atA = def.fallTime + def.waitAtBottom + def.riseTime  -- phase: arrived at A
-            local atB = def.fallTime                                    -- phase: arrived at B
-            local colorA = { 0.30, 0.55, 0.85 }  -- IF blue
-            local colorB = { 0.85, 0.55, 0.30 }  -- SW orange
+            local atA = def.fallTime + def.waitAtBottom + def.riseTime -- phase: arrived at A
+            local atB = def.fallTime                                   -- phase: arrived at B
+            local colorA = { 0.30, 0.55, 0.85 }                        -- IF blue
+            local colorB = { 0.85, 0.55, 0.30 }                        -- SW orange
             local nameA = def.endpointA or "A"
             local nameB = def.endpointB or "B"
 
@@ -2252,10 +2476,15 @@ BuildSyncUI = function()
         local pos = GetTramPosition(phase, def)
         -- Use tram-specific segment colors instead of elevator colors
         local seg
-        if phase < def.fallTime then seg = 1
-        elseif phase < def.fallTime + def.waitAtBottom then seg = 2
-        elseif phase < def.fallTime + def.waitAtBottom + def.riseTime then seg = 3
-        else seg = 4 end
+        if phase < def.fallTime then
+            seg = 1
+        elseif phase < def.fallTime + def.waitAtBottom then
+            seg = 2
+        elseif phase < def.fallTime + def.waitAtBottom + def.riseTime then
+            seg = 3
+        else
+            seg = 4
+        end
         local sc = def.segColors and def.segColors[seg]
         local r, g, b = sc and sc.r or 0.5, sc and sc.g or 0.5, sc and sc.b or 0.5
         local alpha = primary and 0.90 or 0.60
@@ -2270,10 +2499,15 @@ BuildSyncUI = function()
 
         local names = def.phaseNames or { "FALL", "BTM", "RISE", "TOP" }
         local phaseName
-        if phase < def.fallTime then phaseName = names[1]
-        elseif phase < def.fallTime + def.waitAtBottom then phaseName = names[2]
-        elseif phase < def.fallTime + def.waitAtBottom + def.riseTime then phaseName = names[3]
-        else phaseName = names[4] end
+        if phase < def.fallTime then
+            phaseName = names[1]
+        elseif phase < def.fallTime + def.waitAtBottom then
+            phaseName = names[2]
+        elseif phase < def.fallTime + def.waitAtBottom + def.riseTime then
+            phaseName = names[3]
+        else
+            phaseName = names[4]
+        end
         hbarObj.phaseLbl:SetText(phaseName)
         hbarObj.phaseLbl:SetTextColor(r, g, b, primary and 0.85 or 0.55)
         -- Clamp phase label to stay within bar bounds
@@ -2293,13 +2527,13 @@ BuildSyncUI = function()
         local ttd
         if def.horizontal then
             if phase < def.fallTime then
-                ttd = def.fallTime - phase                             -- arriving at B
+                ttd = def.fallTime - phase                                   -- arriving at B
             elseif phase < def.fallTime + def.waitAtBottom then
-                ttd = def.fallTime + def.waitAtBottom - phase          -- departing B
+                ttd = def.fallTime + def.waitAtBottom - phase                -- departing B
             elseif phase < def.fallTime + def.waitAtBottom + def.riseTime then
-                ttd = def.fallTime + def.waitAtBottom + def.riseTime - phase  -- arriving at A
+                ttd = def.fallTime + def.waitAtBottom + def.riseTime - phase -- arriving at A
             else
-                ttd = def.cycleTime - phase                            -- departing A
+                ttd = def.cycleTime - phase                                  -- departing A
             end
         else
             ttd = def.cycleTime - phase
@@ -2398,10 +2632,15 @@ BuildSyncUI = function()
             end
             -- Helper: get phase name from cycle phase using given segment def
             local function PhaseName(ph, d)
-                if ph < d.fallTime then return "FALL"
-                elseif ph < d.fallTime + d.waitAtBottom then return "BTM"
-                elseif ph < d.fallTime + d.waitAtBottom + d.riseTime then return "RISE"
-                else return "TOP" end
+                if ph < d.fallTime then
+                    return "FALL"
+                elseif ph < d.fallTime + d.waitAtBottom then
+                    return "BTM"
+                elseif ph < d.fallTime + d.waitAtBottom + d.riseTime then
+                    return "RISE"
+                else
+                    return "TOP"
+                end
             end
 
             local h1 = GetLiftHeight(phase1, def)
@@ -2508,7 +2747,7 @@ local function BuildDevPanel()
     local DEV_BAR_H = 18
     local DEV_PAD   = 12
 
-    local p = CreateFrame("Frame", "AldorTaxDevPanel", UIParent, "BackdropTemplate")
+    local p         = CreateFrame("Frame", "AldorTaxDevPanel", UIParent, "BackdropTemplate")
     p:SetSize(DEV_BAR_W + DEV_PAD * 2, 370)
     p:SetPoint("CENTER", 300, 0)
     p:SetFrameStrata("DIALOG")
@@ -2516,11 +2755,13 @@ local function BuildDevPanel()
     p:EnableMouse(true)
     p:RegisterForDrag("LeftButton")
     p:SetScript("OnDragStart", p.StartMoving)
-    p:SetScript("OnDragStop",  p.StopMovingOrSizing)
+    p:SetScript("OnDragStop", p.StopMovingOrSizing)
     p:SetBackdrop({
-        bgFile   = "Interface/ChatFrame/ChatFrameBackground",
+        bgFile = "Interface/ChatFrame/ChatFrameBackground",
         edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 14,
+        tile = true,
+        tileSize = 16,
+        edgeSize = 14,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
     p:SetBackdropColor(0.06, 0.06, 0.09, 0.95)
@@ -2549,7 +2790,9 @@ local function BuildDevPanel()
         bg:SetBackdrop({
             bgFile = "Interface/ChatFrame/ChatFrameBackground",
             edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-            tile = true, tileSize = 4, edgeSize = 8,
+            tile = true,
+            tileSize = 4,
+            edgeSize = 8,
             insets = { left = 2, right = 2, top = 2, bottom = 2 },
         })
         bg:SetBackdropColor(0, 0, 0, 0.8)
@@ -2560,7 +2803,7 @@ local function BuildDevPanel()
         eb:SetPoint("BOTTOMRIGHT", -4, 2)
         eb:SetFontObject("ChatFontSmall")
         eb:SetAutoFocus(false)
-        eb:SetNumeric(false)  -- we handle decimals ourselves
+        eb:SetNumeric(false) -- we handle decimals ourselves
         eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
         if tooltip then
             eb:SetScript("OnEnter", function(self)
@@ -2589,7 +2832,8 @@ local function BuildDevPanel()
         row.bg:SetSize(DEV_BAR_W + 2, DEV_BAR_H + 2)
         row.bg:SetBackdrop({
             bgFile = "Interface/ChatFrame/ChatFrameBackground",
-            tile = true, tileSize = 4,
+            tile = true,
+            tileSize = 4,
         })
         row.bg:SetBackdropColor(0.02, 0.02, 0.04, 0.9)
 
@@ -2649,10 +2893,10 @@ local function BuildDevPanel()
 
     -- ── Layout segments for a bar ───────────────────────────────────────────
     local function LayoutBar(row, def, segOverrides, isPrimary)
-        local ft  = segOverrides and segOverrides.fallTime     or def.fallTime
+        local ft  = segOverrides and segOverrides.fallTime or def.fallTime
         local wb  = segOverrides and segOverrides.waitAtBottom or def.waitAtBottom
-        local rt  = segOverrides and segOverrides.riseTime     or def.riseTime
-        local wt  = segOverrides and segOverrides.waitAtTop    or def.waitAtTop
+        local rt  = segOverrides and segOverrides.riseTime or def.riseTime
+        local wt  = segOverrides and segOverrides.waitAtTop or def.waitAtTop
         local cyc = ft + wb + rt + wt
         if cyc <= 0 then return end
         local times = { ft, wb, rt, wt }
@@ -2710,20 +2954,25 @@ local function BuildDevPanel()
     end
 
     local function UpdateBarCursor(row, phase, def, segOverrides)
-        local ft  = segOverrides and segOverrides.fallTime     or def.fallTime
+        local ft  = segOverrides and segOverrides.fallTime or def.fallTime
         local wb  = segOverrides and segOverrides.waitAtBottom or def.waitAtBottom
-        local rt  = segOverrides and segOverrides.riseTime     or def.riseTime
-        local wt  = segOverrides and segOverrides.waitAtTop    or def.waitAtTop
+        local rt  = segOverrides and segOverrides.riseTime or def.riseTime
+        local wt  = segOverrides and segOverrides.waitAtTop or def.waitAtTop
         local cyc = ft + wb + rt + wt
         if cyc <= 0 then return end
         local xPos = (phase / cyc) * DEV_BAR_W
         local a = row.alpha
         -- Segment color for cursor
         local seg
-        if phase < ft then seg = 1
-        elseif phase < ft + wb then seg = 2
-        elseif phase < ft + wb + rt then seg = 3
-        else seg = 4 end
+        if phase < ft then
+            seg = 1
+        elseif phase < ft + wb then
+            seg = 2
+        elseif phase < ft + wb + rt then
+            seg = 3
+        else
+            seg = 4
+        end
         local c = def.segColors and def.segColors[seg]
         local r, g, b = c and c.r or 0.8, c and c.g or 0.8, c and c.b or 0.8
         row.cursor:SetColorTexture(r, g, b, 0.95 * a)
@@ -2747,16 +2996,16 @@ local function BuildDevPanel()
     segHdr:SetText("Primary Segments")
     segHdr:SetTextColor(0.85, 0.78, 0.50)
 
-    local colW = 70
+    local colW        = 70
     local inputStartX = DEV_PAD
     local inputStartY = inputY - 18
 
-    local ebFall, _   = MakeInput(p, "Fall",   inputStartX,              inputStartY, colW, "Fall duration (seconds)")
-    local ebBottom, _  = MakeInput(p, "Bottom", inputStartX + colW + 10, inputStartY, colW, "Wait at bottom (seconds)")
-    local ebRise, _    = MakeInput(p, "Rise",   inputStartX + (colW + 10) * 2, inputStartY, colW, "Rise duration (seconds)")
-    local ebTop, _     = MakeInput(p, "Top",    inputStartX + (colW + 10) * 3, inputStartY, colW, "Wait at top (seconds)")
+    local ebFall, _   = MakeInput(p, "Fall", inputStartX, inputStartY, colW, "Fall duration (seconds)")
+    local ebBottom, _ = MakeInput(p, "Bottom", inputStartX + colW + 10, inputStartY, colW, "Wait at bottom (seconds)")
+    local ebRise, _   = MakeInput(p, "Rise", inputStartX + (colW + 10) * 2, inputStartY, colW, "Rise duration (seconds)")
+    local ebTop, _    = MakeInput(p, "Top", inputStartX + (colW + 10) * 3, inputStartY, colW, "Wait at top (seconds)")
 
-    local cycleLabel = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local cycleLabel  = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     cycleLabel:SetPoint("TOPLEFT", inputStartX + (colW + 10) * 4 + 5, inputStartY - 12)
     cycleLabel:SetTextColor(0.6, 0.8, 0.6)
 
@@ -2768,19 +3017,23 @@ local function BuildDevPanel()
     seg2Hdr:SetText("Secondary Segments")
     seg2Hdr:SetTextColor(0.70, 0.65, 0.45)
 
-    local sec2StartY = sec2Y - 18
+    local sec2StartY   = sec2Y - 18
 
-    local ebFall2, _   = MakeInput(p, "Fall",   inputStartX,              sec2StartY, colW, "Secondary fall duration (seconds)")
-    local ebBottom2, _ = MakeInput(p, "Bottom", inputStartX + colW + 10, sec2StartY, colW, "Secondary wait at bottom (seconds)")
-    local ebRise2, _   = MakeInput(p, "Rise",   inputStartX + (colW + 10) * 2, sec2StartY, colW, "Secondary rise duration (seconds)")
-    local ebTop2, _    = MakeInput(p, "Top",    inputStartX + (colW + 10) * 3, sec2StartY, colW, "Secondary wait at top (seconds)")
+    local ebFall2, _   = MakeInput(p, "Fall", inputStartX, sec2StartY, colW, "Secondary fall duration (seconds)")
+    local ebBottom2, _ = MakeInput(p, "Bottom", inputStartX + colW + 10, sec2StartY, colW,
+        "Secondary wait at bottom (seconds)")
+    local ebRise2, _   = MakeInput(p, "Rise", inputStartX + (colW + 10) * 2, sec2StartY, colW,
+        "Secondary rise duration (seconds)")
+    local ebTop2, _    = MakeInput(p, "Top", inputStartX + (colW + 10) * 3, sec2StartY, colW,
+        "Secondary wait at top (seconds)")
 
-    local cycleLabel2 = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local cycleLabel2  = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     cycleLabel2:SetPoint("TOPLEFT", inputStartX + (colW + 10) * 4 + 5, sec2StartY - 12)
     cycleLabel2:SetTextColor(0.6, 0.8, 0.6)
 
     -- Group secondary elements for show/hide
-    local sec2Elements = { seg2Hdr, ebFall2:GetParent(), ebBottom2:GetParent(), ebRise2:GetParent(), ebTop2:GetParent(), cycleLabel2 }
+    local sec2Elements = { seg2Hdr, ebFall2:GetParent(), ebBottom2:GetParent(), ebRise2:GetParent(), ebTop2:GetParent(),
+        cycleLabel2 }
 
     -- Offset input
     local offsetY = sec2StartY - 42
@@ -2882,13 +3135,13 @@ local function BuildDevPanel()
         -- Stash originals on first configure (or if switching lifts)
         if not origDef or origDef._id ~= liftID then
             origDef = {
-                _id          = liftID,
-                fallTime     = def.fallTime,
-                waitAtBottom = def.waitAtBottom,
-                riseTime     = def.riseTime,
-                waitAtTop    = def.waitAtTop,
-                cycleTime    = def.cycleTime,
-                dualOffset   = def.dualOffset,
+                _id           = liftID,
+                fallTime      = def.fallTime,
+                waitAtBottom  = def.waitAtBottom,
+                riseTime      = def.riseTime,
+                waitAtTop     = def.waitAtTop,
+                cycleTime     = def.cycleTime,
+                dualOffset    = def.dualOffset,
                 fallTime2     = def.fallTime2,
                 waitAtBottom2 = def.waitAtBottom2,
                 riseTime2     = def.riseTime2,
@@ -2914,7 +3167,9 @@ local function BuildDevPanel()
         else
             bar2.bg:Hide(); bar2.bar:Hide(); bar2.overlay:Hide()
             bar2.label:Hide()
-            for i = 1, 4 do bar2.segs[i]:Hide(); bar2.segLabels[i]:Hide() end
+            for i = 1, 4 do
+                bar2.segs[i]:Hide(); bar2.segLabels[i]:Hide()
+            end
             bar2.cursor:Hide(); bar2.glow:Hide(); bar2.timeLabel:SetText("")
             for _, el in ipairs(sec2Elements) do el:Hide() end
             offsetHdr:Hide(); ebOffset:GetParent():Hide(); offsetInfo:Hide()
@@ -2964,8 +3219,8 @@ local function BuildDevPanel()
             def.riseTime2     = rt2
             def.waitAtTop2    = wt2
             def.cycleTime2    = ft2 + wb2 + rt2 + wt2
-            devOverrides2 = { fallTime = ft2, waitAtBottom = wb2, riseTime = rt2, waitAtTop = wt2 }
-            local sd = SecDef(def)
+            devOverrides2     = { fallTime = ft2, waitAtBottom = wb2, riseTime = rt2, waitAtTop = wt2 }
+            local sd          = SecDef(def)
             LayoutBar(bar2, sd, devOverrides2, false)
         end
         -- Refresh the sync UI if it exists
@@ -2996,9 +3251,9 @@ local function BuildDevPanel()
         def.riseTime2     = origDef.riseTime2
         def.waitAtTop2    = origDef.waitAtTop2
         def.cycleTime2    = origDef.cycleTime2
-        devOverrides = nil
-        devOverrides2 = nil
-        devOffset = nil
+        devOverrides      = nil
+        devOverrides2     = nil
+        devOffset         = nil
         PopulateInputs(def)
         LayoutBar(bar1, def, nil, true)
         if def.dualLift then
@@ -3058,11 +3313,13 @@ local function BuildLogPanel()
     p:EnableMouse(true)
     p:RegisterForDrag("LeftButton")
     p:SetScript("OnDragStart", p.StartMoving)
-    p:SetScript("OnDragStop",  p.StopMovingOrSizing)
+    p:SetScript("OnDragStop", p.StopMovingOrSizing)
     p:SetBackdrop({
-        bgFile   = "Interface/DialogFrame/UI-DialogBox-Background",
+        bgFile = "Interface/DialogFrame/UI-DialogBox-Background",
         edgeFile = "Interface/DialogFrame/UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
+        tile = true,
+        tileSize = 32,
+        edgeSize = 32,
         insets = { left = 11, right = 12, top = 12, bottom = 11 },
     })
 
@@ -3088,7 +3345,9 @@ local function BuildLogPanel()
     ebFrame:SetPoint("BOTTOMRIGHT", -16, 16)
     ebFrame:SetBackdrop({
         bgFile = "Interface/ChatFrame/ChatFrameBackground",
-        tile = true, tileSize = 5, edgeSize = 0,
+        tile = true,
+        tileSize = 5,
+        edgeSize = 0,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
     ebFrame:SetBackdropColor(0, 0, 0, 0.9)
@@ -3166,20 +3425,11 @@ BuildOptionsPanel = function()
     sub:SetText("Elevator tracker — TBC Classic Anniversary")
     sub:SetTextColor(0.7, 0.7, 0.7)
 
-    local syncHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    syncHdr:SetPoint("TOPLEFT", sub, "BOTTOMLEFT", 0, -16)
-    syncHdr:SetText("Sync broadcast channels")
+    local cbVerbose = MakeCheckbox(panel, sub, -16, "verbose",
+        "Verbose chat",
+        "Print sync and calibration messages to the chat window. Messages are always recorded in the log (/atax log).")
 
-    local cbParty   = MakeCheckbox(panel, syncHdr,  -4,  "syncParty",
-        "Party / Raid",   "Broadcast syncs to your party or raid group.")
-    local cbChannel = MakeCheckbox(panel, cbParty,  nil, "syncChannel",
-        "AldorTaxSync channel", "Broadcast to the shared AldorTaxSync custom channel.")
-    local cbDebug   = MakeCheckbox(panel, cbChannel, nil, "debugChannel",
-        "Debug channel",  "Log all outgoing sync messages to chat for debugging.")
-    local cbVerbose = MakeCheckbox(panel, cbDebug, nil, "verbose",
-        "Verbose chat",   "Print sync and calibration messages to the chat window. Messages are always recorded in the log (/atax log).")
-
-    local behHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    local behHdr    = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     behHdr:SetPoint("TOPLEFT", cbVerbose, "BOTTOMLEFT", 0, -16)
     behHdr:SetText("Behaviour")
 
@@ -3190,7 +3440,7 @@ BuildOptionsPanel = function()
     alwaysHdr:SetText("Always show:")
     alwaysHdr:SetTextColor(0.9, 0.9, 0.9)
 
-    local cbAlways  = MakeCheckbox(panel, nil, nil, "alwaysShowUI",
+    local cbAlways = MakeCheckbox(panel, nil, nil, "alwaysShowUI",
         "Calibration UI", "Show the full progress bar panel instead of blinking text warnings.")
     cbAlways:ClearAllPoints()
     cbAlways:SetPoint("LEFT", alwaysHdr, "RIGHT", 4, 0)
@@ -3228,13 +3478,24 @@ BuildOptionsPanel = function()
         "Deeprun Tram", "Track the Deeprun Tram between Ironforge and Stormwind.")
     local cbTBLift = MakeCheckbox(panel, cbTram, nil, "enableTBLift",
         "Thunder Bluff Lift", "Track the Thunder Bluff elevators.")
+    local cbStormspire = MakeCheckbox(panel, cbTBLift, nil, "enableStormspire",
+        "Stormspire Lift", "Track the Stormspire elevator in Netherstorm.")
+
+    local safetyHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    safetyHdr:SetPoint("TOPLEFT", cbStormspire, "BOTTOMLEFT", 0, -24)
+    safetyHdr:SetText("Safety")
+
+    local cbFallSave = MakeCheckbox(panel, safetyHdr, -4, "fallSaveAlert",
+        "Fall-save alert",
+        "When you fall near a lift, show a clickable button to cast a class save spell (Slow Fall, Levitate, Divine Shield, etc).")
 
     local expHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    expHdr:SetPoint("TOPLEFT", cbTBLift, "BOTTOMLEFT", 0, -24)
+    expHdr:SetPoint("TOPLEFT", cbFallSave, "BOTTOMLEFT", 0, -24)
     expHdr:SetText("Experimental")
 
     local cbSegInput = MakeCheckbox(panel, expHdr, -4, "segmentInput",
-        "Segment calibration (dev)", "Show 4-segment calibration bar for dual lifts instead of the top/bottom click UI. For measuring individual phase durations.")
+        "Segment calibration (dev)",
+        "Show 4-segment calibration bar for dual lifts instead of the top/bottom click UI. For measuring individual phase durations.")
 
     local cfLink = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     cfLink:SetPoint("TOPLEFT", cbSegInput, "BOTTOMLEFT", 4, -8)
@@ -3244,7 +3505,8 @@ BuildOptionsPanel = function()
         cbParty:Refresh(); cbChannel:Refresh(); cbDebug:Refresh(); cbVerbose:Refresh()
         cbThank:Refresh(); cbAlways:Refresh(); cbCompact:Refresh()
         cbAldor:Refresh(); cbGreatLift:Refresh()
-        cbTram:Refresh(); cbTBLift:Refresh(); cbSegInput:Refresh()
+        cbTram:Refresh(); cbTBLift:Refresh(); cbStormspire:Refresh()
+        cbFallSave:Refresh(); cbSegInput:Refresh()
     end)
 
     if Settings and Settings.RegisterCanvasLayoutCategory then
@@ -3279,8 +3541,9 @@ SlashCmdList["ALDORTAX"] = function(msg)
         if not logPanel then logPanel = BuildLogPanel() end
         if logPanel:IsShown() then logPanel:Hide() else logPanel:Show() end
     elseif msg == "testmsg" then
-        Log(string.format("|cffffff00AldorTax testmsg: prefixRegistered=%s  C_ChatInfo=%s  syncChanNum=%d|r",
-            tostring(prefixRegistered), tostring(C_ChatInfo ~= nil), syncChanNum))
+        local gNum = GetGeneralChannelNum()
+        Log(string.format("|cffffff00AldorTax testmsg: prefixRegistered=%s  C_ChatInfo=%s  general=#%s|r",
+            tostring(prefixRegistered), tostring(C_ChatInfo ~= nil), tostring(gNum or "none")))
         SendTestWhisper()
     elseif msg == "reset" then
         if activeLiftID then
@@ -3293,8 +3556,11 @@ SlashCmdList["ALDORTAX"] = function(msg)
     elseif msg == "ui" then
         if not syncUI then
             local ok, result = pcall(BuildSyncUI)
-            if ok then syncUI = result
-            else print("|cffff0000AldorTax BuildSyncUI error: " .. tostring(result) .. "|r") end
+            if ok then
+                syncUI = result
+            else
+                print("|cffff0000AldorTax BuildSyncUI error: " .. tostring(result) .. "|r")
+            end
         end
         if syncUI then
             if activeLiftID and not syncUI.curLiftID then
@@ -3344,7 +3610,7 @@ SlashCmdList["ALDORTAX"] = function(msg)
         local r = AnalyzeTiming(liftID)
         if not r then
             local count = AldorTaxDB and AldorTaxDB.timing and AldorTaxDB.timing[liftID]
-                          and #AldorTaxDB.timing[liftID] or 0
+                and #AldorTaxDB.timing[liftID] or 0
             print(string.format("|cffffff00AldorTax timing [%s]: %d sample(s) — need at least 2.|r",
                 liftID, count))
             return
@@ -3375,7 +3641,7 @@ SlashCmdList["ALDORTAX"] = function(msg)
                 local bias = ""
                 if seg.data.n >= 3 and math.abs(seg.data.meanCorr) > 0.15 then
                     bias = seg.data.meanCorr > 0 and "  ← segment may be too short"
-                                                  or "  ← segment may be too long"
+                        or "  ← segment may be too long"
                 end
                 print(string.format("    %-12s n=%-3d  mean=%+.3fs  std=%.3fs%s",
                     seg.label, seg.data.n, seg.data.meanCorr, seg.data.stdCorr, bias))
@@ -3413,3 +3679,4 @@ SlashCmdList["ALDORTAX"] = function(msg)
         print("|cffff0000AldorTax: Unknown command '" .. msg .. "'. Type /atax help for options.|r")
     end
 end
+
