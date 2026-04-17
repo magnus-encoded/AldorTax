@@ -45,12 +45,12 @@ local LIFTS = {
         id               = "aldor",
         displayName      = "Aldor Lift",
         settingsKey      = "enableAldor",
-        fallTime         = 6.5,
-        riseTime         = 7.8,
-        waitAtTop        = 6.0,
-        waitAtBottom     = 4.7,
+        fallTime         = 6.933, -- TransportAnimation 183169: 18.067s → 25.000s
+        waitAtBottom     = 4.300, -- TransportAnimation 183169: 0s → 4.300s
+        riseTime         = 8.067, -- TransportAnimation 183169: 4.300s → 12.367s
+        waitAtTop        = 5.700, -- TransportAnimation 183169: 12.367s → 18.067s
         cycleTime        = 25.0,
-        epochOffset      = 14.1, -- measured from timing samples; stable across sessions
+        epochOffset      = 13.95, -- circular mean of 59 calibration clicks, sd 1.27s, span 5 days
         mapX             = 0.4169,
         mapY             = 0.3860,
         mapScale         = 1200, -- approximate zone width in yards
@@ -70,12 +70,12 @@ local LIFTS = {
         id               = "stormspire",
         displayName      = "Stormspire Lift",
         settingsKey      = "enableStormspire",
-        fallTime         = 6.5,
-        riseTime         = 7.8,
-        waitAtTop        = 6.0,
-        waitAtBottom     = 4.7,
+        fallTime         = 7.0,    -- TransportAnimation 184330: 18.000s → 25.000s
+        riseTime         = 8.0,    -- TransportAnimation 184330: 4.333s → 12.333s
+        waitAtTop        = 5.667,  -- TransportAnimation 184330: 12.333s → 18.000s
+        waitAtBottom     = 4.333,  -- TransportAnimation 184330: 0s → 4.333s
         cycleTime        = 25.0,
-        epochOffset      = 14.1,
+        epochOffset      = 11.5,   -- FALL events at serverTime%25≈11.5 (n=3, syncLog 04-10)
         mapX             = 0.426,
         mapY             = 0.336,
         mapScale         = 1200,
@@ -85,10 +85,10 @@ local LIFTS = {
         approachSubzones = { ["The Stormspire"] = true },
         deathZones       = { ["The Stormspire"] = true },
         segColors        = {
-            { r = 0.70, g = 0.15, b = 0.65 },  -- falling: purple
-            { r = 0.40, g = 0.20, b = 0.70 },  -- bottom: deep violet
-            { r = 0.80, g = 0.45, b = 0.90 },  -- rising: lavender
-            { r = 0.50, g = 0.30, b = 0.80 },  -- top: indigo
+            { r = 0.70, g = 0.15, b = 0.65 }, -- falling: purple
+            { r = 0.40, g = 0.20, b = 0.70 }, -- bottom: deep violet
+            { r = 0.80, g = 0.45, b = 0.90 }, -- rising: lavender
+            { r = 0.50, g = 0.30, b = 0.80 }, -- top: indigo
         },
     },
     deepruntram = {
@@ -123,12 +123,12 @@ local LIFTS = {
         id = "greatlift",
         displayName = "Great Lift",
         settingsKey = "enableGreatLift",
-        fallTime = 9.80,
-        riseTime = 9.70,
-        waitAtTop = 5.20,
-        waitAtBottom = 5.10,
-        cycleTime = 29.80,
-        mapX = 0.3222, -- midpoint of east/west for general proximity
+        fallTime = 10.0,    -- TransportAnimation 11898: 5.0s → 15.0s
+        riseTime = 10.0,    -- TransportAnimation 11899: 5.0s → 15.0s
+        waitAtTop = 5.0,    -- TransportAnimation: 0s → 5.0s
+        waitAtBottom = 5.0, -- TransportAnimation: 15.0s → 20.0s
+        cycleTime = 30.0,
+        mapX = 0.3222,      -- midpoint of east/west for general proximity
         mapY = 0.2407,
         mapScale = 1000,
         nearYards = 60,
@@ -146,6 +146,35 @@ local LIFTS = {
             { r = 0.22, g = 0.35, b = 0.55 },
             { r = 0.60, g = 0.50, b = 0.18 },
             { r = 0.20, g = 0.48, b = 0.28 },
+        },
+    },
+    ssc = {
+        id           = "ssc",
+        displayName  = "SSC Elevator",
+        settingsKey  = "enableSSC",
+        fallTime     = 16.5,    -- TransportAnimation 183407: 8.500s → 25.000s
+        waitAtBottom = 5.0,     -- TransportAnimation 183407: 25.000s → 30.000s
+        riseTime     = 13.333,  -- TransportAnimation 183407: 30.000s → 43.333s
+        waitAtTop    = 8.5,     -- TransportAnimation 183407: 0s → 8.500s (includes door)
+        cycleTime    = 43.333,
+        mapX         = 0,
+        mapY         = 0,
+        mapScale     = 1,
+        nearYards    = 999,  -- subzone detection only
+        zones        = {
+            ["Coilfang: Serpentshrine Cavern"] = true,
+            ["Serpentshrine Cavern"] = true
+        },
+        nearSubzones = { ["Serpentshrine Cavern"] = true },
+        deathZones   = {
+            ["Coilfang: Serpentshrine Cavern"] = true,
+            ["Serpentshrine Cavern"] = true
+        },
+        segColors    = {
+            { r = 0.20, g = 0.50, b = 0.70 }, -- falling: deep water blue
+            { r = 0.15, g = 0.35, b = 0.55 }, -- bottom: dark abyss
+            { r = 0.30, g = 0.65, b = 0.80 }, -- rising: bright water
+            { r = 0.25, g = 0.55, b = 0.65 }, -- top: surface blue
         },
     },
     tblift = {
@@ -195,34 +224,34 @@ end
 -- reagent = item ID required before Cata (nil if none).
 -- item    = consumable item to use (checked via GetItemCount).
 
-local NOGGENFOGGER = { item = 8529, spell = "Noggenfogger Elixir" }  -- last resort (costs gold, random effect)
+local NOGGENFOGGER = { item = 8529, spell = "Noggenfogger Elixir" } -- last resort (costs gold, random effect)
 
 do
     local _, _, _, tocVersion = GetBuildInfo()
-    local preCata = not tocVersion or tocVersion < 40000  -- Light Feather required before 4.0
+    local preCata = not tocVersion or tocVersion < 40000 -- Light Feather required before 4.0
 
     -- minToc: minimum interface version for the spell to be a valid fall save.
     -- Spells below this version are filtered out after the table is built.
     local allSaves = {
-        MAGE = {
-            { spell = "Slow Fall",  reagent = preCata and 17056 or nil },
+        MAGE        = {
+            { spell = "Slow Fall", reagent = preCata and 17056 or nil },
             { spell = "Blink" },
             NOGGENFOGGER,
         },
-        PRIEST = {
-            { spell = "Levitate",   reagent = preCata and 17056 or nil },
+        PRIEST      = {
+            { spell = "Levitate", reagent = preCata and 17056 or nil },
             NOGGENFOGGER,
         },
-        PALADIN = {
+        PALADIN     = {
             { spell = "Divine Shield" },
             { spell = "Blessing of Protection" },
             NOGGENFOGGER,
         },
-        HUNTER = {
+        HUNTER      = {
             { spell = "Disengage", minToc = 30000 }, -- resets fall in WotLK+; melee-only in TBC
             NOGGENFOGGER,
         },
-        WARRIOR = {
+        WARRIOR     = {
             { spell = "Heroic Leap", minToc = 40000 }, -- Cata+
             NOGGENFOGGER,
         },
@@ -230,22 +259,22 @@ do
             { spell = "Glide" },
             { spell = "Fel Rush" },
         },
-        MONK = {
+        MONK        = {
             { spell = "Zen Flight" },
             { spell = "Roll" },
             NOGGENFOGGER,
         },
-        EVOKER = {
+        EVOKER      = {
             { spell = "Hover" },
         },
-        DRUID = {
-            { spell = "Cat Form" },          -- passive fall damage reduction
+        DRUID       = {
+            { spell = "Cat Form" }, -- passive fall damage reduction
             NOGGENFOGGER,
         },
         -- Classes with no mitigation get Noggenfogger as sole option
-        ROGUE   = { NOGGENFOGGER },
-        WARLOCK = { NOGGENFOGGER },
-        SHAMAN  = { NOGGENFOGGER },
+        ROGUE       = { NOGGENFOGGER },
+        WARLOCK     = { NOGGENFOGGER },
+        SHAMAN      = { NOGGENFOGGER },
         DEATHKNIGHT = { NOGGENFOGGER },
     }
 
@@ -273,7 +302,7 @@ fallSaveFrame:SetFrameStrata("DIALOG")
 fallSaveFrame:Hide()
 fallSaveFrame:RegisterForClicks("LeftButtonUp")
 
-do  -- backdrop
+do -- backdrop
     local bg = fallSaveFrame:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     bg:SetColorTexture(0, 0, 0, 0.75)
@@ -291,9 +320,9 @@ local fallSaveNoSpell = fallSaveFrame:CreateFontString(nil, "OVERLAY", "GameFont
 fallSaveNoSpell:SetPoint("CENTER")
 fallSaveNoSpell:SetTextColor(1, 0, 0)
 
-local fallSaveShown     = false   -- true while the alert is visible
-local fallSaveHideAt    = 0       -- GetTime() when we auto-dismiss
-local wasFalling        = false   -- edge detection for IsFalling()
+local fallSaveShown  = false -- true while the alert is visible
+local fallSaveHideAt = 0     -- GetTime() when we auto-dismiss
+local wasFalling     = false -- edge detection for IsFalling()
 
 -- Find the best usable fall-save for the player's class.
 -- Returns name, texture, actionType ("spell" or "item")  or  nil, nil, nil
@@ -401,28 +430,27 @@ local activeLiftID             = nil -- which lift the player is currently near
 local realTimeOffset           = nil
 local serverTimeOffset         = nil -- GetServerTime() - GetTime(), calibrated once at login
 local AUTO_BROADCAST_INTERVAL  = 45
-local ZONE_SEND_COOLDOWN       = 5 -- seconds after zoning before we send addon messages
-local zonedInAt                = 0 -- GetTime() when we last zoned into a lift area
+local ZONE_SEND_COOLDOWN       = 5   -- seconds after zoning before we send addon messages
+local zonedInAt                = 0   -- GetTime() when we last zoned into a lift area
 local lastProximityCheck       = 0
 local PROXIMITY_CHECK_INTERVAL = 1.0
 
 -- User settings (persisted in AldorTaxDB.settings)
 local settings                 = {
-    syncParty       = true,
-    syncGeneral     = true,
-    syncGuild       = true,
-    debugChannel    = false,
-    verbose         = false,
-    segmentInput    = false,
-    autoThank       = true,
-    alwaysShowUI    = false,
-    alwaysCompact   = false,
-    enableAldor     = true,
-    enableGreatLift = true,
-    enableTram      = false,
-    enableTBLift    = false,
+    autoThank        = true,
+    devTools         = false,
+    debugChannel     = false,
+    verbose          = false,
+    segmentInput     = false,
+    alwaysShowUI     = false,
+    alwaysCompact    = false,
+    enableAldor      = true,
+    enableGreatLift  = true,
+    enableTram       = false,
+    enableTBLift     = false,
     enableStormspire = false,
-    fallSaveAlert   = false,
+    enableSSC        = false,
+    fallSaveAlert    = false,
 }
 
 local BuildOptionsPanel -- forward declaration
@@ -808,26 +836,22 @@ local lastNoChannelWarn = 0
 local function SendMsg(msg)
     local sent = false
     -- General channel (zone-scoped on Classic TBC+)
-    if settings.syncGeneral then
-        local generalNum = GetGeneralChannelNum()
-        if generalNum then
-            if RawSend(msg, "CHANNEL", generalNum) then sent = true end
-        end
+    local generalNum = GetGeneralChannelNum()
+    if generalNum then
+        if RawSend(msg, "CHANNEL", generalNum) then sent = true end
     end
     -- Guild
-    if settings.syncGuild and IsInGuild() then
+    if IsInGuild() then
         if RawSend(msg, "GUILD") then sent = true end
     end
     -- Party / Raid
-    if settings.syncParty then
-        if UnitInRaid("player") then
-            if RawSend(msg, "RAID") then sent = true end
-        elseif GetNumGroupMembers and GetNumGroupMembers() > 0 then
-            if RawSend(msg, "PARTY") then sent = true end
-        end
+    if UnitInRaid("player") then
+        if RawSend(msg, "RAID") then sent = true end
+    elseif GetNumGroupMembers and GetNumGroupMembers() > 0 then
+        if RawSend(msg, "PARTY") then sent = true end
     end
     if settings.debugChannel then
-        Log("|cff88aaff[SYNC OUT] " .. msg .. "|r")
+        Log("|cff88aaff[SYNC OUT] " .. msg:gsub("|", "||") .. "|r")
     end
     if not sent then
         local now = GetTime()
@@ -835,14 +859,6 @@ local function SendMsg(msg)
             lastNoChannelWarn = now
             Log("|cffffff00AldorTax: no channel to send on (solo)|r")
         end
-    end
-end
-
-local function SendTestWhisper()
-    local me = UnitName("player")
-    local ok = RawSend("T|ping from " .. me, "WHISPER", me)
-    if ok then
-        Log("|cff00ff00AldorTax: test whisper sent to self — waiting for echo...|r")
     end
 end
 
@@ -895,8 +911,10 @@ local function ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, t
         or def.cycleTime
     -- Compensate for network latency: the message was current when it left
     -- the sender's client, but took ~latency ms to reach us via the server
-    local _, _, _, latencyWorld = GetNetStats()
-    local netDelay = (latencyWorld or 0) / 1000 -- ms → seconds
+    -- GetNetStats: TBC+ returns (bwIn, bwOut, latencyHome, latencyWorld);
+    -- Vanilla Era returns (bwIn, bwOut, latency). Prefer world latency if present.
+    local _, _, latencyHome, latencyWorld = GetNetStats()
+    local netDelay = ((latencyWorld or latencyHome) or 0) / 1000 -- ms → seconds
     -- Prefer server-time phase if available (v5); fall back to local-time phase (v3/v4)
     local elapsedInCycle
     if srvPhase and serverTimeOffset then
@@ -924,14 +942,16 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
     local isSelf = sender and (sender == myName or sender:match("^" .. myName .. "%-"))
 
     if msgType == "T" then
-        Log(string.format("|cffffff00AldorTax RECV [%s] from %s: %s|r", chatType, tostring(sender), tostring(message)))
+        Log(string.format("|cffffff00AldorTax RECV [%s] from %s: %s|r", chatType, tostring(sender),
+            tostring(message):gsub("|", "||")))
         Log("|cff00ff00AldorTax: TEST MESSAGE RECEIVED OK — addon messaging is working.|r")
         return
     end
 
-    if isSelf then return end  -- always ignore own echoes (guild/General reflect back)
+    if isSelf then return end -- always ignore own echoes (guild/General reflect back)
 
-    Log(string.format("|cffffff00AldorTax RECV [%s] from %s: %s|r", chatType, tostring(sender), tostring(message)))
+    Log(string.format("|cffffff00AldorTax RECV [%s] from %s: %s|r", chatType, tostring(sender),
+        tostring(message):gsub("|", "||")))
     local parts = {}
     for p in message:sub(3):gmatch("[^|]+") do parts[#parts + 1] = p end
 
@@ -1251,9 +1271,10 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
     end
 
     -- Auto-broadcast
-    local hasRecipient = (settings.syncGeneral and GetGeneralChannelNum())
-        or (settings.syncGuild and IsInGuild())
-        or (settings.syncParty and (UnitInRaid("player") or (GetNumGroupMembers and GetNumGroupMembers() > 0)))
+    local hasRecipient = GetGeneralChannelNum()
+        or IsInGuild()
+        or UnitInRaid("player")
+        or (GetNumGroupMembers and GetNumGroupMembers() > 0)
     if st.lastSync > 0 and hasRecipient then
         local now = GetTime()
         if now - st.lastAutoBroadcast >= AUTO_BROADCAST_INTERVAL then
@@ -3425,12 +3446,8 @@ BuildOptionsPanel = function()
     sub:SetText("Elevator tracker — TBC Classic Anniversary")
     sub:SetTextColor(0.7, 0.7, 0.7)
 
-    local cbVerbose = MakeCheckbox(panel, sub, -16, "verbose",
-        "Verbose chat",
-        "Print sync and calibration messages to the chat window. Messages are always recorded in the log (/atax log).")
-
-    local behHdr    = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    behHdr:SetPoint("TOPLEFT", cbVerbose, "BOTTOMLEFT", 0, -16)
+    local behHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    behHdr:SetPoint("TOPLEFT", sub, "BOTTOMLEFT", 0, -16)
     behHdr:SetText("Behaviour")
 
     local cbThank   = MakeCheckbox(panel, behHdr, -4, "autoThank",
@@ -3467,46 +3484,190 @@ BuildOptionsPanel = function()
     end)
 
     local liftHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    liftHdr:SetPoint("TOPLEFT", cbCompact, "BOTTOMLEFT", 0, -24)
+    liftHdr:SetPoint("TOPLEFT", alwaysHdr, "BOTTOMLEFT", 0, -24)
     liftHdr:SetText("Lifts")
 
+    -- Row 1
     local cbAldor = MakeCheckbox(panel, liftHdr, -4, "enableAldor",
         "Aldor Rise", "Track the Aldor Rise elevator in Shattrath City.")
-    local cbGreatLift = MakeCheckbox(panel, cbAldor, nil, "enableGreatLift",
+    local cbGreatLift = MakeCheckbox(panel, nil, nil, "enableGreatLift",
         "Great Lift", "Track the Great Lift between Barrens and Thousand Needles.")
-    local cbTram = MakeCheckbox(panel, cbGreatLift, nil, "enableTram",
+    cbGreatLift:ClearAllPoints()
+    cbGreatLift:SetPoint("LEFT", cbAldor.label, "RIGHT", 16, 0)
+    local cbTram = MakeCheckbox(panel, nil, nil, "enableTram",
         "Deeprun Tram", "Track the Deeprun Tram between Ironforge and Stormwind.")
-    local cbTBLift = MakeCheckbox(panel, cbTram, nil, "enableTBLift",
+    cbTram:ClearAllPoints()
+    cbTram:SetPoint("LEFT", cbGreatLift.label, "RIGHT", 16, 0)
+    -- Row 2
+    local cbTBLift = MakeCheckbox(panel, cbAldor, nil, "enableTBLift",
         "Thunder Bluff Lift", "Track the Thunder Bluff elevators.")
-    local cbStormspire = MakeCheckbox(panel, cbTBLift, nil, "enableStormspire",
+    local cbStormspire = MakeCheckbox(panel, nil, nil, "enableStormspire",
         "Stormspire Lift", "Track the Stormspire elevator in Netherstorm.")
+    cbStormspire:ClearAllPoints()
+    cbStormspire:SetPoint("LEFT", cbTBLift.label, "RIGHT", 16, 0)
+    local cbSSC = MakeCheckbox(panel, nil, nil, "enableSSC",
+        "SSC Elevator", "Track the Serpentshrine Cavern elevator.")
+    cbSSC:ClearAllPoints()
+    cbSSC:SetPoint("LEFT", cbStormspire.label, "RIGHT", 16, 0)
 
     local safetyHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    safetyHdr:SetPoint("TOPLEFT", cbStormspire, "BOTTOMLEFT", 0, -24)
+    safetyHdr:SetPoint("TOPLEFT", cbTBLift, "BOTTOMLEFT", 0, -16)
     safetyHdr:SetText("Safety")
 
     local cbFallSave = MakeCheckbox(panel, safetyHdr, -4, "fallSaveAlert",
         "Fall-save alert",
         "When you fall near a lift, show a clickable button to cast a class save spell (Slow Fall, Levitate, Divine Shield, etc).")
 
-    local expHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    expHdr:SetPoint("TOPLEFT", cbFallSave, "BOTTOMLEFT", 0, -24)
-    expHdr:SetText("Experimental")
+    -- ─── Dev tools (hidden unless devTools is enabled) ─────────────────────
+    local devHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    devHdr:SetPoint("TOPLEFT", cbFallSave, "BOTTOMLEFT", 0, -16)
+    devHdr:SetText("Developer")
 
-    local cbSegInput = MakeCheckbox(panel, expHdr, -4, "segmentInput",
-        "Segment calibration (dev)",
+    local cbDevTools = MakeCheckbox(panel, devHdr, -4, "devTools",
+        "Show dev tools",
+        "Toggle visibility of developer/diagnostic options below.")
+
+    local cbVerbose = MakeCheckbox(panel, cbDevTools, nil, "verbose",
+        "Verbose chat",
+        "Print sync and calibration messages to the chat window. Messages are always recorded in the log (/atax log).")
+    local cbDebug = MakeCheckbox(panel, nil, nil, "debugChannel",
+        "Debug logging",
+        "Log outgoing sync messages and other diagnostic info.")
+    cbDebug:ClearAllPoints()
+    cbDebug:SetPoint("LEFT", cbVerbose.label, "RIGHT", 12, 0)
+    local cbSegInput = MakeCheckbox(panel, nil, nil, "segmentInput",
+        "Segment calibration",
         "Show 4-segment calibration bar for dual lifts instead of the top/bottom click UI. For measuring individual phase durations.")
+    cbSegInput:ClearAllPoints()
+    cbSegInput:SetPoint("LEFT", cbDebug.label, "RIGHT", 12, 0)
+
+    local devWidgets = { cbVerbose, cbDebug, cbSegInput }
+
+    -- Dev action buttons (migrated from slash commands)
+    local function MakeDevButton(anchorTo, yOff, label, onClick)
+        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        b:SetSize(170, 22)
+        b:SetPoint("TOPLEFT", anchorTo, "BOTTOMLEFT", 0, yOff or -6)
+        b:SetText(label)
+        b:SetScript("OnClick", onClick)
+        devWidgets[#devWidgets + 1] = b
+        return b
+    end
+
+    local btnLog = MakeDevButton(cbVerbose, -8, "Toggle log panel", function()
+        if not logPanel then logPanel = BuildLogPanel() end
+        if logPanel:IsShown() then logPanel:Hide() else logPanel:Show() end
+    end)
+
+    local btnDevTimer = MakeDevButton(btnLog, nil, "Toggle dev timer overlay", function()
+        if devTimerFrame:IsShown() then
+            devTimerFrame:Hide()
+            devTimerStart = nil
+        else
+            devTimerStart = GetTime()
+            devTimerFrame:Show()
+        end
+    end)
+
+    -- Lift selector shared by timing + segment tuning actions
+    local liftIDs = {}
+    for id in pairs(LIFTS) do liftIDs[#liftIDs + 1] = id end
+    table.sort(liftIDs)
+    local selectedLift = liftIDs[1] or "aldor"
+
+    local liftLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    liftLabel:SetPoint("TOPLEFT", btnDevTimer, "BOTTOMLEFT", 0, -10)
+    liftLabel:SetText("Lift for dev actions:")
+    devWidgets[#devWidgets + 1] = liftLabel
+
+    local liftDropdown = CreateFrame("Frame", "AldorTaxDevLiftDropdown", panel, "UIDropDownMenuTemplate")
+    liftDropdown:SetPoint("LEFT", liftLabel, "RIGHT", -8, -2)
+    UIDropDownMenu_SetWidth(liftDropdown, 120)
+    UIDropDownMenu_SetText(liftDropdown, LIFTS[selectedLift] and LIFTS[selectedLift].displayName or selectedLift)
+    UIDropDownMenu_Initialize(liftDropdown, function(self, level)
+        for _, id in ipairs(liftIDs) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = LIFTS[id].displayName or id
+            info.func = function()
+                selectedLift = id
+                UIDropDownMenu_SetText(liftDropdown, LIFTS[id].displayName or id)
+            end
+            info.checked = (id == selectedLift)
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    devWidgets[#devWidgets + 1] = liftDropdown
+
+    local function PrintTiming(liftID)
+        local r = AnalyzeTiming(liftID)
+        if not r then
+            local count = AldorTaxDB and AldorTaxDB.timing and AldorTaxDB.timing[liftID]
+                and #AldorTaxDB.timing[liftID] or 0
+            print(string.format("|cffffff00AldorTax timing [%s]: %d sample(s) — need at least 2.|r",
+                liftID, count))
+            return
+        end
+        local def = LIFTS[liftID]
+        local hours = r.timeSpan / 3600
+        print(string.format("|cffffff00AldorTax timing: %s (%d samples over %.1fh)|r",
+            def and def.displayName or liftID, r.n, hours))
+        print(string.format("  Epoch offset: %.3f ± %.3f  (configured: %.1f, cycle: %.2f)",
+            r.meanEpoch, r.stdEpoch, def and def.epochOffset or 0, def and def.cycleTime or 0))
+        if hours >= 0.1 then
+            print(string.format("  Drift: %+.3fs/hour → cycle error: %+.4fs",
+                r.driftPerHour, r.impliedCycleError))
+            if math.abs(r.impliedCycleError) > 0.05 then
+                print(string.format("  |cffff6600⚠ Implied true cycle: %.3fs (configured: %.2fs)|r",
+                    (def and def.cycleTime or 0) + r.impliedCycleError, def and def.cycleTime or 0))
+            end
+        else
+            print("  Drift: (need >6min of data)")
+        end
+        local segs = {}
+        for label, s in pairs(r.segments) do segs[#segs + 1] = { label = label, data = s } end
+        table.sort(segs, function(a, b) return a.label < b.label end)
+        if #segs > 0 then
+            print("  Segment corrections:")
+            for _, seg in ipairs(segs) do
+                local bias = ""
+                if seg.data.n >= 3 and math.abs(seg.data.meanCorr) > 0.15 then
+                    bias = seg.data.meanCorr > 0 and "  ← segment may be too short"
+                        or "  ← segment may be too long"
+                end
+                print(string.format("    %-12s n=%-3d  mean=%+.3fs  std=%.3fs%s",
+                    seg.label, seg.data.n, seg.data.meanCorr, seg.data.stdCorr, bias))
+            end
+        end
+    end
+
+    local btnTiming = MakeDevButton(liftLabel, -22, "Show timing diagnostics", function()
+        PrintTiming(selectedLift)
+    end)
+
+    local btnTuning = MakeDevButton(btnTiming, nil, "Open segment tuning panel", function()
+        if not devPanel then devPanel = BuildDevPanel() end
+        devPanel.ConfigureLift(selectedLift)
+        if devPanel:IsShown() then devPanel:Hide() else devPanel:Show() end
+    end)
+
+    local function RefreshDevVisibility()
+        for _, w in ipairs(devWidgets) do
+            if settings.devTools then w:Show() else w:Hide() end
+        end
+    end
+    cbDevTools:HookScript("OnClick", RefreshDevVisibility)
 
     local cfLink = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    cfLink:SetPoint("TOPLEFT", cbSegInput, "BOTTOMLEFT", 4, -8)
+    cfLink:SetPoint("TOPLEFT", btnTuning, "BOTTOMLEFT", 4, -12)
     cfLink:SetText("Feedback: |cff00ccffwww.curseforge.com/wow/addons/aldor-tax|r")
 
     panel:SetScript("OnShow", function()
-        cbParty:Refresh(); cbChannel:Refresh(); cbDebug:Refresh(); cbVerbose:Refresh()
         cbThank:Refresh(); cbAlways:Refresh(); cbCompact:Refresh()
         cbAldor:Refresh(); cbGreatLift:Refresh()
-        cbTram:Refresh(); cbTBLift:Refresh(); cbStormspire:Refresh()
-        cbFallSave:Refresh(); cbSegInput:Refresh()
+        cbTram:Refresh(); cbTBLift:Refresh(); cbStormspire:Refresh(); cbSSC:Refresh()
+        cbFallSave:Refresh()
+        cbDevTools:Refresh(); cbVerbose:Refresh(); cbDebug:Refresh(); cbSegInput:Refresh()
+        RefreshDevVisibility()
     end)
 
     if Settings and Settings.RegisterCanvasLayoutCategory then
@@ -3537,14 +3698,6 @@ SlashCmdList["ALDORTAX"] = function(msg)
         end
         BroadcastSync(activeLiftID)
         print(string.format("|cff00ff00AldorTax: %s sync broadcast.|r", def.displayName))
-    elseif msg == "log" then
-        if not logPanel then logPanel = BuildLogPanel() end
-        if logPanel:IsShown() then logPanel:Hide() else logPanel:Show() end
-    elseif msg == "testmsg" then
-        local gNum = GetGeneralChannelNum()
-        Log(string.format("|cffffff00AldorTax testmsg: prefixRegistered=%s  C_ChatInfo=%s  general=#%s|r",
-            tostring(prefixRegistered), tostring(C_ChatInfo ~= nil), tostring(gNum or "none")))
-        SendTestWhisper()
     elseif msg == "reset" then
         if activeLiftID then
             liftState[activeLiftID].lastSync = 0
@@ -3579,104 +3732,15 @@ SlashCmdList["ALDORTAX"] = function(msg)
             AldorTaxDB.blocklist[target] = nil
             print("|cff00ff00AldorTax: Unblocked " .. target .. "|r")
         end
-    elseif msg == "where" then
-        local zone = GetZoneText() or "?"
-        local sub = GetSubZoneText() or "?"
-        local mini = GetMinimapZoneText() or "?"
-        local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
-        local mx, my = 0, 0
-        if mapID then
-            local pos = C_Map.GetPlayerMapPosition(mapID, "player")
-            if pos then mx, my = pos:GetXY() end
-        end
-        print(string.format("|cffffff00AldorTax where: zone=%s sub=%s mini=%s map=%s (%.4f, %.4f)|r",
-            zone, sub, mini, tostring(mapID), mx, my))
-        -- Scan nameplates for known NPCs
-        local npcs = {}
-        for i = 1, 40 do
-            local unit = "nameplate" .. i
-            if UnitExists(unit) then
-                npcs[#npcs + 1] = UnitName(unit)
-            end
-        end
-        if #npcs > 0 then
-            print("|cffffff00  Nameplates: " .. table.concat(npcs, ", ") .. "|r")
-        else
-            print("|cffffff00  Nameplates: (none visible)|r")
-        end
-    elseif msg:sub(1, 6) == "timing" then
-        local arg = msg:sub(8)
-        local liftID = (arg ~= "") and arg or (activeLiftID or "aldor")
-        local r = AnalyzeTiming(liftID)
-        if not r then
-            local count = AldorTaxDB and AldorTaxDB.timing and AldorTaxDB.timing[liftID]
-                and #AldorTaxDB.timing[liftID] or 0
-            print(string.format("|cffffff00AldorTax timing [%s]: %d sample(s) — need at least 2.|r",
-                liftID, count))
-            return
-        end
-        local def = LIFTS[liftID]
-        local hours = r.timeSpan / 3600
-        print(string.format("|cffffff00AldorTax timing: %s (%d samples over %.1fh)|r",
-            def and def.displayName or liftID, r.n, hours))
-        print(string.format("  Epoch offset: %.3f ± %.3f  (configured: %.1f, cycle: %.2f)",
-            r.meanEpoch, r.stdEpoch, def and def.epochOffset or 0, def and def.cycleTime or 0))
-        if hours >= 0.1 then
-            print(string.format("  Drift: %+.3fs/hour → cycle error: %+.4fs",
-                r.driftPerHour, r.impliedCycleError))
-            if math.abs(r.impliedCycleError) > 0.05 then
-                print(string.format("  |cffff6600⚠ Implied true cycle: %.3fs (configured: %.2fs)|r",
-                    (def and def.cycleTime or 0) + r.impliedCycleError, def and def.cycleTime or 0))
-            end
-        else
-            print("  Drift: (need >6min of data)")
-        end
-        -- Per-segment breakdown
-        local segs = {}
-        for label, s in pairs(r.segments) do segs[#segs + 1] = { label = label, data = s } end
-        table.sort(segs, function(a, b) return a.label < b.label end)
-        if #segs > 0 then
-            print("  Segment corrections:")
-            for _, seg in ipairs(segs) do
-                local bias = ""
-                if seg.data.n >= 3 and math.abs(seg.data.meanCorr) > 0.15 then
-                    bias = seg.data.meanCorr > 0 and "  ← segment may be too short"
-                        or "  ← segment may be too long"
-                end
-                print(string.format("    %-12s n=%-3d  mean=%+.3fs  std=%.3fs%s",
-                    seg.label, seg.data.n, seg.data.meanCorr, seg.data.stdCorr, bias))
-            end
-        end
-    elseif msg:sub(1, 8) == "devpanel" then
-        local arg = msg:sub(10)
-        if not devPanel then devPanel = BuildDevPanel() end
-        local liftID = (arg ~= "") and arg or (activeLiftID or "aldor")
-        devPanel.ConfigureLift(liftID)
-        if devPanel:IsShown() then devPanel:Hide() else devPanel:Show() end
-    elseif msg == "dev" then
-        if devTimerFrame:IsShown() then
-            devTimerFrame:Hide()
-            devTimerStart = nil
-            print("|cff00ff00AldorTax: Dev timer hidden.|r")
-        else
-            devTimerStart = GetTime()
-            devTimerFrame:Show()
-            print("|cff00ff00AldorTax: Dev timer started — drag to reposition.|r")
-        end
     elseif msg == "" or msg == "help" then
         print("|cffffff00AldorTax Commands:|r")
         print("  /atax sync          — sync at departure + broadcast")
         print("  /atax reset         — clear timer")
         print("  /atax ui            — toggle sync panel")
         print("  /atax config        — open settings panel")
-        print("  /atax log           — toggle copyable log panel")
-        print("  /atax testmsg       — whisper yourself to test addon messaging")
         print("  /atax unblock Name-Realm  — remove from blocklist")
-        print("  /atax timing [lift] — show timing diagnostics (drift, segment bias)")
-        print("  /atax devpanel [lift] — segment tuning panel (live bars, edit times)")
-        print("  /atax dev           — toggle dev timer overlay (for video calibration)")
+        print("  (dev tools live in /atax config → Developer)")
     else
         print("|cffff0000AldorTax: Unknown command '" .. msg .. "'. Type /atax help for options.|r")
     end
 end
-
