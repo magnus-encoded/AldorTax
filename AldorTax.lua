@@ -300,7 +300,7 @@ fallSaveFrame:SetSize(260, 52)
 fallSaveFrame:SetPoint("CENTER", 0, 100)
 fallSaveFrame:SetFrameStrata("DIALOG")
 fallSaveFrame:Hide()
-fallSaveFrame:RegisterForClicks("LeftButtonUp")
+fallSaveFrame:RegisterForClicks("AnyDown")
 
 do -- backdrop
     local bg = fallSaveFrame:CreateTexture(nil, "BACKGROUND")
@@ -369,8 +369,11 @@ local function ShowFallSaveAlert()
         fallSaveText:Show()
         fallSaveNoSpell:Hide()
         if not InCombatLockdown() then
-            fallSaveFrame:SetAttribute("type", actionType)
-            fallSaveFrame:SetAttribute(actionType, name)
+            local macroText = (actionType == "item")
+                and ("/use " .. name)
+                or  ("/cast " .. name)
+            fallSaveFrame:SetAttribute("type", "macro")
+            fallSaveFrame:SetAttribute("macrotext", macroText)
         end
     else
         -- No save available — show a plain warning
