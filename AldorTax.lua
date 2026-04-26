@@ -431,7 +431,7 @@ local activeLiftID             = nil -- which lift the player is currently near
 -- ─── Shared state ────────────────────────────────────────────────────────────
 
 local realTimeOffset           = nil
-local serverTimeOffset         = nil -- GetServerTime() - GetTime(), calibrated once at login
+local serverTimeOffset         = nil -- GetServerTime() - GetTime(), recalibrated periodically
 local AUTO_BROADCAST_INTERVAL  = 45
 local ZONE_SEND_COOLDOWN       = 5   -- seconds after zoning before we send addon messages
 local zonedInAt                = 0   -- GetTime() when we last zoned into a lift area
@@ -482,30 +482,64 @@ end
 -- true server time is very close to the new integer value, so the offset is
 -- accurate to within one frame (~16 ms) rather than the ~1 s error you get
 -- from sampling GetServerTime() at an arbitrary moment.
+--
+-- We recalibrate periodically (RECALIBRATE_INTERVAL) so the offset stays
+-- accurate over long sessions: GetTime() is the local frame clock and can
+-- drift relative to the server clock by tens of milliseconds per hour on
+-- typical machines.  Without recalibration that drift accumulates into
+-- visible phase error even when the underlying lift cycle is exact (e.g.
+-- 25.000s for Aldor).  realTimeOffset and the saved-sync restore only run
+-- on the first calibration; subsequent recalibrations only refine
+-- serverTimeOffset and must not stomp in-memory lastSync values that may
+-- have been updated by clicks or sync messages since login.
 
-do
+local RECALIBRATE_INTERVAL = 300  -- seconds
+
+local calibrationFrame = CreateFrame("Frame")
+local firstCalibration = true
+
+local function CalibrateServerTimeOffset()
     local prevSrv = GetServerTime()
-    local f       = CreateFrame("Frame")
-    f:SetScript("OnUpdate", function(self)
+    calibrationFrame:SetScript("OnUpdate", function(self)
         local srv = GetServerTime()
         -- Wait for GetServerTime() tick — gives sub-frame server-time precision
         if srv > prevSrv then
             serverTimeOffset = srv - GetTime()
-            -- ±1 s is fine for display-only local time
-            realTimeOffset = time() - GetTime()
             self:SetScript("OnUpdate", nil)
-            -- Restore saved syncs for all lifts
-            if AldorTaxDB and AldorTaxDB.lifts then
-                for id, dbLift in pairs(AldorTaxDB.lifts) do
-                    if dbLift.lastSyncRealTime and liftState[id] then
-                        local elapsed = (GetTime() + realTimeOffset) - dbLift.lastSyncRealTime
-                        liftState[id].lastSync = GetTime() - elapsed
-                        liftState[id].lastSyncSource = nil
+            if firstCalibration then
+                firstCalibration = false
+                -- ±1 s is fine for display-only local time
+                realTimeOffset = time() - GetTime()
+                -- Restore saved syncs for all lifts
+                if AldorTaxDB and AldorTaxDB.lifts then
+                    for id, dbLift in pairs(AldorTaxDB.lifts) do
+                        if dbLift.lastSyncRealTime and liftState[id] then
+                            local elapsed = (GetTime() + realTimeOffset) - dbLift.lastSyncRealTime
+                            liftState[id].lastSync = GetTime() - elapsed
+                            liftState[id].lastSyncSource = nil
+                        end
                     end
                 end
             end
         end
         prevSrv = srv
+    end)
+end
+
+-- Initial calibration at login.
+CalibrateServerTimeOffset()
+
+-- Periodic recalibration to correct for local-vs-server clock drift over
+-- long sessions.  Reuses calibrationFrame; only serverTimeOffset is updated.
+do
+    local accum = 0
+    local f = CreateFrame("Frame")
+    f:SetScript("OnUpdate", function(self, elapsed)
+        accum = accum + (elapsed or 0)
+        if accum >= RECALIBRATE_INTERVAL then
+            accum = 0
+            CalibrateServerTimeOffset()
+        end
     end)
 end
 
