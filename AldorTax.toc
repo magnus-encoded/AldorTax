@@ -1,6 +1,6 @@
 ## Interface: 11508, 20505, 50500, 110100
 ## Title: Aldor Tax
-## Notes: Tracks elevator cycles (Aldor Rise, Great Lift, Deeprun Tram). Warns before departure. Click to sync timing. Syncs with nearby players automatically.
+## Notes: Tracks lift and tram cycles for Aldor, Stormspire, Great Lift, TB Lift, Deeprun Tram, and SSC. Warns before departure. Click to sync; auto-syncs with nearby players via General/Guild.
 ## Version: 0.8.1
 ## Author: Fizziness
 ## SavedVariables: AldorTaxDB

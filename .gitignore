@@ -18,3 +18,5 @@ log.txt
 .venv/
 *.py
 *.png
+data/
+.mcp.json

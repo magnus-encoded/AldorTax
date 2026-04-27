@@ -70,6 +70,7 @@ function FrameMethods:GetEffectiveScale()       return self._scale or 1 end
 function FrameMethods:SetMovable(m)            end
 function FrameMethods:EnableMouse(e)           end
 function FrameMethods:RegisterForDrag(...)     end
+function FrameMethods:SetClampedToScreen(c)    end
 function FrameMethods:SetFrameStrata(s)        end
 function FrameMethods:SetFrameLevel(l)         self._frameLevel = l end
 function FrameMethods:GetFrameLevel()          return self._frameLevel or 1 end
@@ -234,6 +235,7 @@ function GetCursorPosition() return 0, 0 end
 function GetBuildInfo() return "2.5.5", "45745", "Mar 1 2026", 20505 end
 function CombatLogGetCurrentEventInfo() return 0, "NONE" end
 function IsFalling() return false end
+function GetPlayerFacing() return 0 end -- deterministic: facing north
 function UnitClass(unit) return "Mage", "MAGE" end
 function IsUsableSpell(spell) return true, false end
 function GetItemCount(id) return 20 end
@@ -263,6 +265,13 @@ Settings = {}
 function Settings.RegisterCanvasLayoutCategory(frame, name) return { ID = name } end
 function Settings.RegisterAddOnCategory(category) end
 function Settings.OpenToCategory(id) end
+
+-- Dropdown menu API (no-op stubs)
+function UIDropDownMenu_SetWidth(...)      end
+function UIDropDownMenu_SetText(...)       end
+function UIDropDownMenu_Initialize(...)    end
+function UIDropDownMenu_CreateInfo()       return {} end
+function UIDropDownMenu_AddButton(...)     end
 
 -- ─── Globals expected by the addon ──────────────────────────────────────────
 

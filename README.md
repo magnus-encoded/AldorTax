@@ -6,15 +6,18 @@ Transport timing addon for WoW Classic Anniversary. Tracks lift and tram cycles 
 
 ## Supported Transports
 
-- **Aldor Rise** (Shattrath City) -- 25.0s cycle
-- **The Great Lift** (Thousand Needles / The Barrens) -- 29.8s cycle
-- **Deeprun Tram** (IF-SW, beta) -- 143.0s cycle
+- **Aldor Lift** (Shattrath City) -- 25.0s cycle
+- **Stormspire Lift** (Netherstorm) -- 25.0s cycle
+- **Great Lift** (Thousand Needles / The Barrens) -- 30.0s cycle, dual platform
+- **TB Lift** (Thunder Bluff) -- 30.0s cycle, dual platform
+- **Deeprun Tram** (IF-SW) -- 143.0s cycle
+- **SSC Elevator** (Serpentshrine Cavern) -- 43.3s cycle
 
 The Great Lift is disabled on clients where it no longer exists (Cataclysm+).
 
 ## How It Works
 
-Click a phase segment on the tracking bar when you see the transport reach that point. A 200ms reaction offset is applied automatically. Your sync is broadcast to nearby players via the AldorTaxSync channel and party/raid.
+Click a phase segment on the tracking bar when you see the transport reach that point. A 200ms reaction offset is applied automatically. Your sync is broadcast to nearby players via General/Guild and party/raid.
 
 The UI switches between a full panel (when near the transport) and a compact view (when approaching).
 
