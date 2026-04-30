@@ -186,7 +186,7 @@ local LIFTS = {
         waitAtTop     = 5.50,
         waitAtBottom  = 5.50,
         cycleTime     = 30.00,
-        epochOffset   = 25.5, -- measured from timing samples
+        epochOffset   = 12.54, -- circular mean of "South arrives" first-sync clicks: 13.5 (2026-04-22), 11.6 (2026-04-23), n=2, sd≈1s
         mapX          = 0.318,
         mapY          = 0.626,
         mapScale      = 1000,
