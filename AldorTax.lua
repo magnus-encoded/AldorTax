@@ -95,11 +95,12 @@ local LIFTS = {
         id           = "deepruntram",
         displayName  = "Deeprun Tram",
         settingsKey  = "enableTram",
-        fallTime     = 58.5, -- travel IF -> SW
-        waitAtBottom = 13.0, -- dwell at SW
-        riseTime     = 58.5, -- travel SW -> IF
-        waitAtTop    = 13.0, -- dwell at IF
-        cycleTime    = 143.0,
+        fallTime     = 58.633, -- TransportAnimation 176080: 0->58633ms (IF->SW)
+        waitAtBottom = 13.034, -- TransportAnimation 176080: 58633->71667ms (dwell at SW)
+        riseTime     = 58.633, -- TransportAnimation 176080: 71667->130300ms (SW->IF)
+        waitAtTop    = 13.033, -- TransportAnimation 176080: 130300->143333ms (dwell at IF)
+        cycleTime    = 143.333,
+        epochOffset  = 84.758, -- circular mean of n=2 first-sync clicks (2026-04-20, 2026-04-23) on corrected cycle; pair diff 0.885s
         mapX         = 0,
         mapY         = 0,
         mapScale     = 1,
