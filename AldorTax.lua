@@ -1351,15 +1351,18 @@ end
 
 -- Returns the phase colour (r, g, b) for a given cycle position.
 local function GetPhaseColor(phase, def)
+    local seg
     if phase < def.fallTime then
-        return 0.85, 0.12, 0.10 -- falling: red
+        seg = 1
     elseif phase < def.fallTime + def.waitAtBottom then
-        return 0.22, 0.42, 0.88 -- bottom: blue
+        seg = 2
     elseif phase < def.fallTime + def.waitAtBottom + def.riseTime then
-        return 0.95, 0.72, 0.08 -- rising: yellow
+        seg = 3
     else
-        return 0.10, 0.78, 0.25 -- top: green
+        seg = 4
     end
+    local c = def.segColors[seg]
+    return c.r, c.g, c.b
 end
 
 -- Returns a def-like table with the secondary platform's segment times.
