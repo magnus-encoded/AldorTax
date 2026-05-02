@@ -239,6 +239,92 @@ C_ChatInfo.SendAddonMessage = origSend
 ChatThrottleLib = savedCTL
 
 
+-- ─── Test 10: SSC sync acceptance ──────────────────────────────────────────
+-- Pre-Phase-2 regression protection: a sync message for liftID="ssc" should
+-- be accepted and stored, just like any other registered lift.
+
+section("Test 10: SSC sync received and stored")
+
+local sscCycle = 43.333
+local sscPhase = GetServerTime() % sscCycle
+-- v5: S|ver|liftID|phase|name|realm|fall|bottom|rise|top|origin|srvPhase
+local sscMsg = string.format("S|5|ssc|%.3f|SCRaider|TestRealm|16.500|5.000|13.333|8.500|C|%.3f",
+    sscPhase, sscPhase)
+MockAPI.ReceiveAddonMessage("ALDORTAX", sscMsg, "CHANNEL", "SCRaider")
+
+assert_true(AldorTaxDB.lifts.ssc ~= nil, "ssc sync entry created in DB")
+assert_true(AldorTaxDB.lifts.ssc.lastSyncRealTime ~= nil, "ssc lastSyncRealTime saved")
+
+
+-- ─── Test 11: SSC phase computation with 43.333s cycle ─────────────────────
+-- The stored sync should place the cycle start near "now" when srvPhase
+-- reflects the current server time. Drift should be small (< 0.25s) at
+-- zero latency, identical to the Aldor self-sync test.
+
+section("Test 11: SSC phase computation respects 43.333s cycle")
+
+local sscExpectedRealTime = GetTime() + (time() - GetTime()) -- GetRealTime()
+local sscDriftRaw = math.abs(AldorTaxDB.lifts.ssc.lastSyncRealTime - sscExpectedRealTime)
+-- GetServerTime is integer-floored in the mock while GetAbsoluteTime is fractional,
+-- so raw drift can be up to ~1s of subsecond skew. The phase invariant — drift
+-- modulo cycleTime — must still be small. A wrong cycleTime would produce drift
+-- mod cycle up to ~21s, so a tight bound here proves SSC's 43.333s cycle is used.
+local sscDriftMod = sscDriftRaw % sscCycle
+local sscPhaseError = math.min(sscDriftMod, sscCycle - sscDriftMod)
+assert_true(sscPhaseError < 1.5,
+    string.format("ssc self-sync drift mod cycle < 1.5s (got %.4f, raw %.4f)",
+        sscPhaseError, sscDriftRaw))
+
+
+-- ─── Test 12: SSC isolation from other lifts ───────────────────────────────
+-- Syncing SSC must not disturb aldor's existing sync state.
+
+section("Test 12: SSC sync does not disturb other lifts")
+
+local preAldorRT = AldorTaxDB.lifts.aldor.lastSyncRealTime
+local sscPhase2 = (GetServerTime() + 7) % sscCycle
+local sscMsg2 = string.format("S|5|ssc|%.3f|SCRaider2|TestRealm|16.500|5.000|13.333|8.500|C|%.3f",
+    sscPhase2, sscPhase2)
+MockAPI.ReceiveAddonMessage("ALDORTAX", sscMsg2, "CHANNEL", "SCRaider2")
+
+assert_eq(AldorTaxDB.lifts.aldor.lastSyncRealTime, preAldorRT,
+    "aldor sync unchanged after second ssc sync")
+
+
+-- ─── Test 13: SSC subzone activates the lift when enabled ──────────────────
+-- With enableSSC=true and the player's subzone set to "Serpentshrine Cavern",
+-- a zone-change event must mark SSC as the active lift. We verify indirectly
+-- by checking that /atax sync (which requires activeLiftID) now broadcasts
+-- a message tagged "ssc". This protects the subzone-only detection path
+-- (mapX=0, nearYards=999) used by SSC and the Deeprun Tram.
+
+section("Test 13: SSC subzone detection sets active lift")
+
+-- Re-load settings with enableSSC=true via ADDON_LOADED
+AldorTaxDB.settings = AldorTaxDB.settings or {}
+AldorTaxDB.settings.enableSSC = true
+MockAPI.FireEvent("ADDON_LOADED", "AldorTax")
+
+-- Move player into SSC subzone and fire zone change
+MockAPI.SetZone("Coilfang: Serpentshrine Cavern", "Serpentshrine Cavern")
+MockAPI.FireEvent("ZONE_CHANGED_NEW_AREA")
+
+-- Wait past the zone send cooldown so /atax sync isn't suppressed
+MockAPI.AdvanceTime(10)
+
+ctlCalls = {}
+SlashCmdList["ALDORTAX"]("sync")
+local sawSSCBroadcast = false
+for _, c in ipairs(ctlCalls) do
+    if c.text and c.text:find("|ssc|", 1, true) then
+        sawSSCBroadcast = true
+        break
+    end
+end
+assert_true(sawSSCBroadcast,
+    "SSC subzone is detected and /atax sync broadcasts an ssc message")
+
+
 -- ─── Results ────────────────────────────────────────────────────────────────
 
 H.results()
