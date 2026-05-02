@@ -1398,27 +1398,27 @@ BuildSyncUI = function()
     local curLiftID     = nil
 
     -- ── Main frame ──────────────────────────────────────────────────────────
-    local p             = CreateFrame("Frame", "AldorTaxSyncUI", UIParent, "BackdropTemplate")
-    p:SetSize(BAR_W_FULL + PAD * 2, 94)
+    local syncUI             = CreateFrame("Frame", "AldorTaxSyncUI", UIParent, "BackdropTemplate")
+    syncUI:SetSize(BAR_W_FULL + PAD * 2, 94)
     if AldorTaxDB and AldorTaxDB.windowPos then
         local wp = AldorTaxDB.windowPos
-        p:SetPoint(wp.point, UIParent, wp.relPoint, wp.x, wp.y)
+        syncUI:SetPoint(wp.point, UIParent, wp.relPoint, wp.x, wp.y)
     else
-        p:SetPoint("TOP", UIParent, "TOP", 0, -120)
+        syncUI:SetPoint("TOP", UIParent, "TOP", 0, -120)
     end
-    p:SetFrameStrata("MEDIUM")
-    p:SetMovable(true)
-    p:EnableMouse(true)
-    p:RegisterForDrag("LeftButton")
-    p:SetScript("OnDragStart", p.StartMoving)
-    p:SetScript("OnDragStop", function(self)
+    syncUI:SetFrameStrata("MEDIUM")
+    syncUI:SetMovable(true)
+    syncUI:EnableMouse(true)
+    syncUI:RegisterForDrag("LeftButton")
+    syncUI:SetScript("OnDragStart", syncUI.StartMoving)
+    syncUI:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
         if AldorTaxDB then
             local point, _, relPoint, x, y = self:GetPoint(1)
             AldorTaxDB.windowPos = { point = point, relPoint = relPoint, x = x, y = y }
         end
     end)
-    p:SetBackdrop({
+    syncUI:SetBackdrop({
         bgFile = "Interface/ChatFrame/ChatFrameBackground",
         edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
         tile = true,
@@ -1426,28 +1426,28 @@ BuildSyncUI = function()
         edgeSize = 14,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    p:SetBackdropColor(0.04, 0.04, 0.07, 0.92)
-    p:SetBackdropBorderColor(0.40, 0.36, 0.22, 0.70)
+    syncUI:SetBackdropColor(0.04, 0.04, 0.07, 0.92)
+    syncUI:SetBackdropBorderColor(0.40, 0.36, 0.22, 0.70)
 
     -- ── Title ───────────────────────────────────────────────────────────────
-    local title = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local title = syncUI:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     title:SetPoint("TOPLEFT", PAD, -7)
     title:SetText("Lift  |cff888888click phase to sync|r")
     title:SetTextColor(1, 0.82, 0)
-    p.title = title
+    syncUI.title = title
 
     -- ── Source label ────────────────────────────────────────────────────────
-    local sourceLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local sourceLabel = syncUI:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     sourceLabel:SetPoint("TOPRIGHT", -PAD, -7)
     sourceLabel:SetText("no sync")
     sourceLabel:SetTextColor(0.6, 0.6, 0.6)
-    p.sourceLabel = sourceLabel
+    syncUI.sourceLabel = sourceLabel
 
     -- ═════════════════════════════════════════════════════════════════════════
     -- HORIZONTAL BAR ELEMENTS (single-lift mode: Aldor)
     -- ═════════════════════════════════════════════════════════════════════════
 
-    local barBg = CreateFrame("Frame", nil, p, "BackdropTemplate")
+    local barBg = CreateFrame("Frame", nil, syncUI, "BackdropTemplate")
     barBg:SetPoint("TOPLEFT", PAD - 2, -24)
     barBg:SetSize(BAR_W_FULL + 4, BAR_H + 4)
     barBg:SetBackdrop({
@@ -1460,9 +1460,9 @@ BuildSyncUI = function()
     })
     barBg:SetBackdropColor(0.02, 0.02, 0.04, 0.90)
     barBg:SetBackdropBorderColor(0.12, 0.12, 0.16, 0.70)
-    p.barBg = barBg
+    syncUI.barBg = barBg
 
-    local bar = CreateFrame("Frame", nil, p)
+    local bar = CreateFrame("Frame", nil, syncUI)
     bar:SetSize(BAR_W_FULL, BAR_H)
     bar:SetPoint("TOPLEFT", PAD, -26)
 
@@ -1508,7 +1508,7 @@ BuildSyncUI = function()
         end)
     end
 
-    local overlay = CreateFrame("Frame", nil, p)
+    local overlay = CreateFrame("Frame", nil, syncUI)
     overlay:SetSize(BAR_W_FULL, BAR_H)
     overlay:SetPoint("TOPLEFT", PAD, -26)
     overlay:SetFrameLevel(bar:GetFrameLevel() + 10)
@@ -1525,29 +1525,29 @@ BuildSyncUI = function()
     cursorGlow:SetColorTexture(1, 1, 1, 0.25)
     cursorGlow:SetSize(10, BAR_H + 8)
     cursorGlow:SetBlendMode("ADD")
-    p.cursorGlow = cursorGlow
+    syncUI.cursorGlow = cursorGlow
 
     local cursor = overlay:CreateTexture(nil, "OVERLAY", nil, 2)
     cursor:SetColorTexture(1, 1, 1, 1)
     cursor:SetSize(4, BAR_H + 6)
     cursor:SetPoint("CENTER", overlay, "LEFT", 0, 0)
-    p.cursor  = cursor
-    p.bar     = bar
-    p.overlay = overlay
-    p:Hide()
+    syncUI.cursor  = cursor
+    syncUI.bar     = bar
+    syncUI.overlay = overlay
+    syncUI:Hide()
 
     local timeLabel = overlay:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     timeLabel:SetPoint("BOTTOM", cursor, "TOP", 0, 2)
     timeLabel:SetShadowOffset(1, -1)
     timeLabel:SetShadowColor(0, 0, 0, 1)
-    p.timeLabel = timeLabel
+    syncUI.timeLabel = timeLabel
 
     -- ═════════════════════════════════════════════════════════════════════════
     -- DUAL VERTICAL BAR ELEMENTS (dual-lift mode: Great Lift)
     -- ═════════════════════════════════════════════════════════════════════════
 
     -- Container for vertical layout (hidden in single-lift mode)
-    local dualContainer = CreateFrame("Frame", nil, p)
+    local dualContainer = CreateFrame("Frame", nil, syncUI)
     dualContainer:Hide()
 
     -- Optional background texture (e.g. screenshot showing lift positions)
@@ -1739,7 +1739,7 @@ BuildSyncUI = function()
     local HBAR_H        = 20
     local HBAR_GAP      = 8
 
-    local tramContainer = CreateFrame("Frame", nil, p)
+    local tramContainer = CreateFrame("Frame", nil, syncUI)
     tramContainer:Hide()
 
     local isTram = false
@@ -2024,7 +2024,7 @@ BuildSyncUI = function()
         end
     end
 
-    local sayBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    local sayBtn = CreateFrame("Button", nil, syncUI, "UIPanelButtonTemplate")
     sayBtn:SetSize(130, 24)
     sayBtn:SetText("|cffffcc00Say Warning|r")
     sayBtn:SetNormalFontObject("GameFontNormalSmall")
@@ -2032,19 +2032,19 @@ BuildSyncUI = function()
     local sayOverlay = sayBtn:CreateTexture(nil, "ARTWORK", nil, 2)
     sayOverlay:SetColorTexture(0.7, 0.55, 0.05, 0.25)
     sayOverlay:SetAllPoints()
-    p.sayBtn = sayBtn
+    syncUI.sayBtn = sayBtn
 
     sayBtn:SetScript("OnClick", function() DoSayPosition() end)
 
-    sayBtn:SetPoint("BOTTOM", p, "BOTTOM", 0, 8)
+    sayBtn:SetPoint("BOTTOM", syncUI, "BOTTOM", 0, 8)
 
-    local tyLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    tyLabel:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -8, 6)
+    local tyLabel = syncUI:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    tyLabel:SetPoint("BOTTOMRIGHT", syncUI, "BOTTOMRIGHT", -8, 6)
     tyLabel:SetTextColor(0.85, 0.75, 0.35, 0.5)
     tyLabel:SetText(AldorTaxDB and AldorTaxDB.ty and AldorTaxDB.ty > 0 and tostring(AldorTaxDB.ty) or "")
-    p.tyLabel = tyLabel
+    syncUI.tyLabel = tyLabel
 
-    local sayIcon = CreateFrame("Button", nil, p)
+    local sayIcon = CreateFrame("Button", nil, syncUI)
     sayIcon:SetSize(22, 22)
     sayIcon:SetNormalTexture("Interface/Common/VoiceChat-Speaker")
     local waves = sayIcon:CreateTexture(nil, "OVERLAY")
@@ -2059,7 +2059,7 @@ BuildSyncUI = function()
         GameTooltip:Show()
     end)
     sayIcon:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    p.sayIcon = sayIcon
+    syncUI.sayIcon = sayIcon
 
     -- ═════════════════════════════════════════════════════════════════════════
     -- LAYOUT FUNCTIONS
@@ -2099,11 +2099,11 @@ BuildSyncUI = function()
         if frameW < 200 then frameW = 200 end
         -- title(20) + labelAbove(14) + bars + timeBelow(14) + sayBtn(24) + padding
         local frameH = 20 + 14 + VBAR_H + 6 + 14 + 24 + PAD + 8
-        p:SetSize(frameW, frameH)
+        syncUI:SetSize(frameW, frameH)
 
         dualContainer:ClearAllPoints()
-        dualContainer:SetPoint("TOPLEFT", p, "TOPLEFT", 0, 0)
-        dualContainer:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", 0, 0)
+        dualContainer:SetPoint("TOPLEFT", syncUI, "TOPLEFT", 0, 0)
+        dualContainer:SetPoint("BOTTOMRIGHT", syncUI, "BOTTOMRIGHT", 0, 0)
 
         vbar1.bg:ClearAllPoints()
         vbar1.bg:SetPoint("TOP", dualContainer, "TOP", -(VBAR_GAP / 2 + VBAR_W / 2), -36)
@@ -2115,17 +2115,17 @@ BuildSyncUI = function()
         dualBgTex:SetAllPoints(dualContainer)
 
         sayBtn:ClearAllPoints()
-        sayBtn:SetPoint("BOTTOM", p, "BOTTOM", 0, 8)
+        sayBtn:SetPoint("BOTTOM", syncUI, "BOTTOM", 0, 8)
     end
 
     local function LayoutDualCompact()
         local frameW = VBAR_W * 2 + VBAR_GAP + PAD * 2 + 10
         local frameH = VBAR_H + PAD * 2
-        p:SetSize(frameW, frameH)
+        syncUI:SetSize(frameW, frameH)
 
         dualContainer:ClearAllPoints()
-        dualContainer:SetPoint("TOPLEFT", p, "TOPLEFT", 0, 0)
-        dualContainer:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", 0, 0)
+        dualContainer:SetPoint("TOPLEFT", syncUI, "TOPLEFT", 0, 0)
+        dualContainer:SetPoint("BOTTOMRIGHT", syncUI, "BOTTOMRIGHT", 0, 0)
 
         vbar1.bg:ClearAllPoints()
         vbar1.bg:SetPoint("LEFT", dualContainer, "LEFT", PAD, 0)
@@ -2144,11 +2144,11 @@ BuildSyncUI = function()
         local frameW = rowW + PAD * 2
         -- title(20) + row1 + gap + row2 + portalIcons(35) + sayBtn(24) + padding
         local frameH = 20 + (HBAR_H + 6 + 12) * 2 + HBAR_GAP + 35 + 24 + PAD + 12
-        p:SetSize(frameW, frameH)
+        syncUI:SetSize(frameW, frameH)
 
         tramContainer:ClearAllPoints()
-        tramContainer:SetPoint("TOPLEFT", p, "TOPLEFT", 0, 0)
-        tramContainer:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", 0, 0)
+        tramContainer:SetPoint("TOPLEFT", syncUI, "TOPLEFT", 0, 0)
+        tramContainer:SetPoint("BOTTOMRIGHT", syncUI, "BOTTOMRIGHT", 0, 0)
 
         hbar2.row:ClearAllPoints()
         hbar2.row:SetPoint("TOP", tramContainer, "TOP", 0, -42)
@@ -2184,7 +2184,7 @@ BuildSyncUI = function()
         tramContainer.portalR:Show(); tramContainer.portalRLbl:Show()
 
         sayBtn:ClearAllPoints()
-        sayBtn:SetPoint("BOTTOM", p, "BOTTOM", 0, 8)
+        sayBtn:SetPoint("BOTTOM", syncUI, "BOTTOM", 0, 8)
     end
 
     -- ── Compact tram layout ───────────────────────────────────────────────
@@ -2204,11 +2204,11 @@ BuildSyncUI = function()
         -- Frame: two rows + gap + small top/bottom padding
         local frameW = rowW + PAD * 2 + 28 -- +28 for sayIcon to the right
         local frameH = rowH * 2 + COMPACT_GAP + 14
-        p:SetSize(frameW, frameH)
+        syncUI:SetSize(frameW, frameH)
 
         tramContainer:ClearAllPoints()
-        tramContainer:SetPoint("TOPLEFT", p, "TOPLEFT", 0, 0)
-        tramContainer:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", 0, 0)
+        tramContainer:SetPoint("TOPLEFT", syncUI, "TOPLEFT", 0, 0)
+        tramContainer:SetPoint("BOTTOMRIGHT", syncUI, "BOTTOMRIGHT", 0, 0)
 
         -- Row 2 (south tram) on top, row 1 (north tram) below — same as full mode
         hbar2.row:ClearAllPoints()
@@ -2291,7 +2291,7 @@ BuildSyncUI = function()
         local def = LIFTS[liftID]
         if not def then return end
         curLiftID = liftID
-        p.curLiftID = liftID -- expose on frame for external guard
+        syncUI.curLiftID = liftID -- expose on frame for external guard
         isDual = def.dualLift and not settings.segmentInput and true or false
         isTram = def.horizontal and true or false
         if isDual then
@@ -2403,9 +2403,9 @@ BuildSyncUI = function()
             ShowHorizontal()
             -- Restore single-lift frame dimensions
             if isCompact then
-                p:SetSize(BAR_W_COMPACT + PAD * 2, 50)
+                syncUI:SetSize(BAR_W_COMPACT + PAD * 2, 50)
             else
-                p:SetSize(BAR_W_FULL + PAD * 2, 94)
+                syncUI:SetSize(BAR_W_FULL + PAD * 2, 94)
             end
             -- Reposition and recolor horizontal segments
             local xOff = 0
@@ -2431,10 +2431,10 @@ BuildSyncUI = function()
             end
         end
     end
-    p.ReconfigureLift = ReconfigureLift
+    syncUI.ReconfigureLift = ReconfigureLift
 
     -- ── Compact / full mode toggle ──────────────────────────────────────────
-    function p.SetCompact(compact)
+    function syncUI.SetCompact(compact)
         if compact == isCompact then return end
         isCompact = compact
 
@@ -2463,7 +2463,7 @@ BuildSyncUI = function()
         else
             if isCompact then
                 barW = BAR_W_COMPACT
-                p:SetSize(BAR_W_COMPACT + PAD * 2 + 30, 50)
+                syncUI:SetSize(BAR_W_COMPACT + PAD * 2 + 30, 50)
                 title:Hide(); sourceLabel:Hide(); sayBtn:Hide(); tyLabel:Hide()
                 for i = 1, 4 do phaseLabels[i]:Hide() end
                 bar:ClearAllPoints()
@@ -2481,7 +2481,7 @@ BuildSyncUI = function()
                 sayIcon:Show()
             else
                 barW = BAR_W_FULL
-                p:SetSize(BAR_W_FULL + PAD * 2, 94)
+                syncUI:SetSize(BAR_W_FULL + PAD * 2, 94)
                 title:Show(); sourceLabel:Show(); sayIcon:Hide()
                 if AldorTaxDB and AldorTaxDB.ty and AldorTaxDB.ty > 0 then tyLabel:Show() end
                 for i = 1, 4 do phaseLabels[i]:Show() end
@@ -2589,7 +2589,7 @@ BuildSyncUI = function()
         hbarObj.phaseLbl:SetText("")
     end
 
-    function p.UpdateCursor()
+    function syncUI.UpdateCursor()
         if not activeLiftID then return end
         local def = LIFTS[activeLiftID]
         local st  = liftState[activeLiftID]
@@ -2763,7 +2763,7 @@ BuildSyncUI = function()
         end
     end
 
-    return p
+    return syncUI
 end
 
 
