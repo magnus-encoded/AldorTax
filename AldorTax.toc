@@ -1,7 +1,7 @@
 ## Interface: 11508, 20505, 50500, 110100
 ## Title: Aldor Tax
 ## Notes: Tracks lift and tram cycles for Aldor, Stormspire, Great Lift, TB Lift, Deeprun Tram, and SSC. Warns before departure. Click to sync; auto-syncs with nearby players via General/Guild.
-## Version: 0.8.1
+## Version: 0.9.0
 ## Author: Fizziness
 ## SavedVariables: AldorTaxDB
 AldorTax.lua
