@@ -221,6 +221,7 @@ function UnitName(unit)
 end
 function UnitExists(unit) return unit == "player" end
 function UnitInRaid(unit) return false end
+function UnitIsGhost(unit) return false end  -- tests assume living player; override if needed
 function IsInGuild() return false end
 function GetRealmName() return "TestRealm" end
 function GetZoneText() return _zone end

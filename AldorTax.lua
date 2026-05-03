@@ -162,7 +162,8 @@ local LIFTS = {
         mapX         = 0,
         mapY         = 0,
         mapScale     = 1,
-        nearYards    = 999,  -- subzone detection only
+        nearYards      = 999,  -- subzone detection only
+        hideAfterEntry = 70,   -- hide UI 70s after a live zone entry; never show on res
         zones        = {
             ["Coilfang: Serpentshrine Cavern"] = true,
             ["Serpentshrine Cavern"] = true
@@ -439,6 +440,8 @@ local ZONE_SEND_COOLDOWN       = 5   -- seconds after zoning before we send addo
 local zonedInAt                = 0   -- GetTime() when we last zoned into a lift area
 local lastProximityCheck       = 0
 local PROXIMITY_CHECK_INTERVAL = 1.0
+local sscUIHideAt              = 0     -- GetTime() deadline for SSC UI auto-hide (0 = off)
+local sscSuppressed            = false -- true = don't show SSC UI this visit
 
 -- User settings (persisted in AldorTaxDB.settings)
 local settings                 = {
@@ -1141,7 +1144,22 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 if not activeLiftID then
                     zonedInAt = GetTime() -- entering a lift zone; delay sends for server rate-limiter
                 end
+                local prevLiftID = activeLiftID
                 activeLiftID = newLiftID
+                -- SSC: decide whether to show UI this visit
+                if newLiftID == "ssc" and prevLiftID ~= "ssc" then
+                    if UnitIsGhost("player") then
+                        sscSuppressed = true
+                        sscUIHideAt   = 0
+                    else
+                        sscSuppressed = false
+                        local hideDelay = LIFTS.ssc.hideAfterEntry or 0
+                        sscUIHideAt   = hideDelay > 0 and (GetTime() + hideDelay) or 0
+                    end
+                elseif prevLiftID == "ssc" then
+                    sscSuppressed = false
+                    sscUIHideAt   = 0
+                end
                 if not syncUI then syncUI = BuildSyncUI() end
                 syncUI.ReconfigureLift(activeLiftID)
             end
@@ -1149,7 +1167,9 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             local st         = liftState[activeLiftID]
             st.isNearLift    = CheckNearLift(def)
             st.isApproaching = CheckApproachLift(def)
-            if settings.alwaysCompact then
+            if sscSuppressed then
+                syncUI:Hide()
+            elseif settings.alwaysCompact then
                 syncUI:Show()
                 if syncUI.SetCompact then syncUI.SetCompact(true) end
             elseif settings.alwaysShowUI then
@@ -1165,6 +1185,10 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 syncUI:Hide()
             end
         else
+            if activeLiftID == "ssc" then
+                sscSuppressed = false
+                sscUIHideAt   = 0
+            end
             if syncUI then syncUI:Hide() end
             -- Final broadcast as we leave
             if activeLiftID and liftState[activeLiftID].lastSync > 0 then
@@ -1179,6 +1203,12 @@ end)
 
 logicFrame:SetScript("OnUpdate", function(self, elapsed)
     local now = GetTime()
+    -- SSC auto-hide: expire the timer and suppress further shows
+    if sscUIHideAt > 0 and now >= sscUIHideAt then
+        sscUIHideAt   = 0
+        sscSuppressed = true
+        if syncUI and syncUI:IsShown() then syncUI:Hide() end
+    end
     local doProximity = now - lastProximityCheck >= PROXIMITY_CHECK_INTERVAL
     if doProximity then
         lastProximityCheck = now
@@ -1198,7 +1228,9 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
     if doProximity then
         st.isNearLift    = CheckNearLift(def)
         st.isApproaching = CheckApproachLift(def)
-        if settings.alwaysCompact then
+        if sscSuppressed then
+            if syncUI and syncUI:IsShown() then syncUI:Hide() end
+        elseif settings.alwaysCompact then
             if not syncUI then
                 syncUI = BuildSyncUI(); syncUI.ReconfigureLift(activeLiftID)
             end

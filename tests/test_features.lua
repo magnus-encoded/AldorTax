@@ -325,6 +325,59 @@ assert_true(sawSSCBroadcast,
     "SSC subzone is detected and /atax sync broadcasts an ssc message")
 
 
+-- ─── Test 14: SSC UI auto-hides after hideAfterEntry seconds ───────────────
+-- Entering SSC while alive should show the UI; after 70s it should be hidden
+-- and stay hidden (sscSuppressed) even though the player is still "near" the lift.
+
+section("Test 14: SSC UI hides after hideAfterEntry timeout")
+
+-- Enter SSC as a living player
+MockAPI.SetZone("Coilfang: Serpentshrine Cavern", "Serpentshrine Cavern")
+MockAPI.FireEvent("ZONE_CHANGED_NEW_AREA")
+
+-- UI should be shown immediately (syncUI exists and is visible)
+local sscUI = _G.AldorTaxSyncUI
+assert_true(sscUI ~= nil, "syncUI built on SSC entry")
+assert_true(sscUI:IsShown(), "SSC UI shown on live entry")
+
+-- Advance past the 70s hide timer
+MockAPI.AdvanceTime(71)
+-- Simulate the OnUpdate firing to process the timer
+MockAPI.FireOnUpdate(0)
+
+assert_true(not sscUI:IsShown(), "SSC UI hidden after hideAfterEntry timer expires")
+
+-- Proximity tick should NOT re-show it (sscSuppressed = true)
+MockAPI.AdvanceTime(2)
+MockAPI.FireOnUpdate(0)
+assert_true(not sscUI:IsShown(), "SSC UI stays hidden after timeout (sscSuppressed)")
+
+-- Leave SSC — flags should clear
+MockAPI.SetZone("Zangarmarsh", "Zangarmarsh")
+MockAPI.FireEvent("ZONE_CHANGED_NEW_AREA")
+
+
+-- ─── Test 15: SSC UI suppressed on ghost entry ──────────────────────────────
+-- Entering SSC while a ghost (spirit healer run-back) must not show the UI.
+
+section("Test 15: SSC UI suppressed when entering as ghost")
+
+UnitIsGhost = function(unit) return unit == "player" end  -- simulate ghost
+
+MockAPI.SetZone("Coilfang: Serpentshrine Cavern", "Serpentshrine Cavern")
+MockAPI.FireEvent("ZONE_CHANGED_NEW_AREA")
+MockAPI.FireOnUpdate(0)
+
+assert_true(not sscUI:IsShown(), "SSC UI not shown on ghost entry")
+
+-- Proximity ticks must also keep it hidden
+MockAPI.AdvanceTime(2)
+MockAPI.FireOnUpdate(0)
+assert_true(not sscUI:IsShown(), "SSC UI stays hidden during ghost visit")
+
+UnitIsGhost = function(unit) return false end  -- restore
+
+
 -- ─── Results ────────────────────────────────────────────────────────────────
 
 H.results()
