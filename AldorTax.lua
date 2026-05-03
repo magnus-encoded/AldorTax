@@ -1049,6 +1049,39 @@ end
 local syncUI = nil
 local BuildSyncUI
 
+-- ─── Sync UI visibility state machine ───────────────────────────────────────
+-- Single source of truth for: lazy-build, reconfigure-on-lift-change, and the
+-- show/hide/compact decision tree. Both ZONE_CHANGED and the OnUpdate proximity
+-- tick route through this. Caller is responsible for keeping liftState fields
+-- (isNearLift, isApproaching) and sscSuppressed up to date before calling.
+
+local configuredLiftID = nil
+local function UpdateSyncUIVisibility(liftID)
+    if not liftID then
+        if syncUI then syncUI:Hide() end
+        return
+    end
+    if not syncUI then syncUI = BuildSyncUI() end
+    if liftID ~= configuredLiftID then
+        syncUI.ReconfigureLift(liftID)
+        configuredLiftID = liftID
+    end
+    local st = liftState[liftID]
+    if sscSuppressed then
+        syncUI:Hide()
+    elseif settings.alwaysCompact then
+        syncUI:Show(); syncUI.SetCompact(true)
+    elseif settings.alwaysShowUI then
+        syncUI:Show(); syncUI.SetCompact(false)
+    elseif st.isNearLift then
+        syncUI:Show(); syncUI.SetCompact(false)
+    elseif st.isApproaching then
+        syncUI:Show(); syncUI.SetCompact(true)
+    else
+        syncUI:Hide()
+    end
+end
+
 -- ─── Events ─────────────────────────────────────────────────────────────────
 
 local logicFrame = CreateFrame("Frame")
@@ -1160,30 +1193,12 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                     sscSuppressed = false
                     sscUIHideAt   = 0
                 end
-                if not syncUI then syncUI = BuildSyncUI() end
-                syncUI.ReconfigureLift(activeLiftID)
             end
             local def        = LIFTS[activeLiftID]
             local st         = liftState[activeLiftID]
             st.isNearLift    = CheckNearLift(def)
             st.isApproaching = CheckApproachLift(def)
-            if sscSuppressed then
-                syncUI:Hide()
-            elseif settings.alwaysCompact then
-                syncUI:Show()
-                if syncUI.SetCompact then syncUI.SetCompact(true) end
-            elseif settings.alwaysShowUI then
-                syncUI:Show()
-                if syncUI.SetCompact then syncUI.SetCompact(false) end
-            elseif st.isNearLift then
-                syncUI:Show()
-                if syncUI.SetCompact then syncUI.SetCompact(false) end
-            elseif st.isApproaching then
-                syncUI:Show()
-                if syncUI.SetCompact then syncUI.SetCompact(true) end
-            else
-                syncUI:Hide()
-            end
+            UpdateSyncUIVisibility(activeLiftID)
         else
             if activeLiftID == "ssc" then
                 sscSuppressed = false
@@ -1215,11 +1230,7 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         -- Fallback: zone events can fire before GetZoneText() is ready after /reload
         if not activeLiftID then
             local id = DetectActiveLift()
-            if id then
-                activeLiftID = id
-                if not syncUI then syncUI = BuildSyncUI() end
-                syncUI.ReconfigureLift(activeLiftID)
-            end
+            if id then activeLiftID = id end
         end
     end
     if not activeLiftID then return end
@@ -1228,31 +1239,7 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
     if doProximity then
         st.isNearLift    = CheckNearLift(def)
         st.isApproaching = CheckApproachLift(def)
-        if sscSuppressed then
-            if syncUI and syncUI:IsShown() then syncUI:Hide() end
-        elseif settings.alwaysCompact then
-            if not syncUI then
-                syncUI = BuildSyncUI(); syncUI.ReconfigureLift(activeLiftID)
-            end
-            syncUI.SetCompact(true)
-            if not syncUI:IsShown() then syncUI:Show() end
-        elseif settings.alwaysShowUI then
-            if not syncUI then
-                syncUI = BuildSyncUI(); syncUI.ReconfigureLift(activeLiftID)
-            end
-            syncUI.SetCompact(false)
-            if not syncUI:IsShown() then syncUI:Show() end
-        elseif syncUI then
-            if st.isNearLift then
-                syncUI.SetCompact(false)
-                if not syncUI:IsShown() then syncUI:Show() end
-            elseif st.isApproaching then
-                syncUI.SetCompact(true)
-                if not syncUI:IsShown() then syncUI:Show() end
-            else
-                if syncUI:IsShown() then syncUI:Hide() end
-            end
-        end
+        UpdateSyncUIVisibility(activeLiftID)
     end
 
     local status
