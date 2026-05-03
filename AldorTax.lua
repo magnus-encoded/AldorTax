@@ -1440,6 +1440,7 @@ BuildSyncUI = function()
     end
     syncUI:SetFrameStrata("MEDIUM")
     syncUI:SetMovable(true)
+    syncUI:SetClampedToScreen(true)
     syncUI:EnableMouse(true)
     syncUI:RegisterForDrag("LeftButton")
     syncUI:SetScript("OnDragStart", syncUI.StartMoving)
@@ -2433,6 +2434,21 @@ BuildSyncUI = function()
             sayBtn:SetText("|cffffcc00Say Warning|r")
             dualContainer:Hide()
             ShowHorizontal()
+            -- Reset bar dimensions to match current compact state. Without this,
+            -- a previous SetCompact in dual-lift mode (which doesn't touch barW)
+            -- can leak compact-width geometry into a subsequent single-lift visit.
+            barW = isCompact and BAR_W_COMPACT or BAR_W_FULL
+            local barYOff = isCompact and -12 or -26
+            local bgYOff  = isCompact and -10 or -24
+            bar:ClearAllPoints()
+            bar:SetPoint("TOPLEFT", PAD, barYOff)
+            bar:SetSize(barW, BAR_H)
+            barBg:ClearAllPoints()
+            barBg:SetPoint("TOPLEFT", PAD - 2, bgYOff)
+            barBg:SetSize(barW + 4, BAR_H + 4)
+            overlay:ClearAllPoints()
+            overlay:SetPoint("TOPLEFT", PAD, barYOff)
+            overlay:SetSize(barW, BAR_H)
             -- Restore single-lift frame dimensions
             if isCompact then
                 syncUI:SetSize(BAR_W_COMPACT + PAD * 2, 50)

@@ -378,6 +378,58 @@ assert_true(not sscUI:IsShown(), "SSC UI stays hidden during ghost visit")
 UnitIsGhost = function(unit) return false end  -- restore
 
 
+-- ─── Test 16: ReconfigureLift resets bar geometry on lift transition ────────
+-- Regression: when traveling Aldor (full) → SetCompact(true) → tblift (dual)
+-- → SetCompact(false) → Aldor, the SetCompact early-return guard prevents
+-- the single-lift bar geometry from being reset, leaving the frame at full
+-- size but bar/barBg at compact width. ReconfigureLift's else-branch must
+-- self-heal by resetting bar dimensions before laying out segments.
+
+section("Test 16: ReconfigureLift resets bar geometry on lift transition")
+
+local syncUI = _G.AldorTaxSyncUI
+assert_true(syncUI ~= nil, "syncUI exists for transition test")
+assert_true(type(syncUI.ReconfigureLift) == "function", "ReconfigureLift exposed")
+assert_true(type(syncUI.SetCompact) == "function", "SetCompact exposed")
+
+-- Constants from BuildSyncUI: BAR_W_FULL=460, PAD=12 → full frame width = 484
+local FULL_WIDTH = 460 + 12 * 2
+
+-- Step 1: enter Aldor (single-lift) at full size
+syncUI.ReconfigureLift("aldor")
+syncUI.SetCompact(false)
+-- Force a known starting state: shrink, then re-expand, so isCompact toggles
+syncUI.SetCompact(true)
+syncUI.SetCompact(false)
+assert_eq(syncUI:GetWidth(), FULL_WIDTH, "Aldor full-size frame width is 484")
+
+-- Step 2: shrink to compact
+syncUI.SetCompact(true)
+
+-- Step 3: travel to TB lift (dual). isCompact stays true; isDual becomes true.
+syncUI.ReconfigureLift("tblift")
+
+-- Step 4: dual lift expanded — SetCompact(false) takes the dual branch and
+-- never touches barW. After this, barW remains BAR_W_COMPACT internally.
+syncUI.SetCompact(false)
+
+-- Step 5: return to Aldor. Without the fix, the syncUI frame is full-size
+-- but bar/barBg/segments retain compact width. After the fix, ReconfigureLift
+-- self-heals the geometry.
+syncUI.ReconfigureLift("aldor")
+assert_eq(syncUI:GetWidth(), FULL_WIDTH,
+    "frame width restored to 484 on return to single-lift after dual-lift detour")
+
+-- The frame size assertion alone is not load-bearing — syncUI:SetSize is
+-- already called unconditionally in ReconfigureLift's else-branch. The actual
+-- bug is that bar/barBg/overlay carry compact dimensions from the last
+-- single-lift SetCompact, and the dual-lift SetCompact branch never touches
+-- them. Verify barBg (which is exposed) has been restored to full width.
+assert_true(syncUI.barBg ~= nil, "barBg exposed for geometry check")
+assert_eq(syncUI.barBg:GetWidth(), 460 + 4,
+    "barBg width restored to full (464) after dual-lift detour — guards the actual bug")
+
+
 -- ─── Results ────────────────────────────────────────────────────────────────
 
 H.results()
