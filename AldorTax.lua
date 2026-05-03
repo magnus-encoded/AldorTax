@@ -158,7 +158,7 @@ local LIFTS = {
         riseTime     = 13.333,  -- TransportAnimation 183407: 30.000s → 43.333s
         waitAtTop    = 8.5,     -- TransportAnimation 183407: 0s → 8.500s (includes door)
         cycleTime    = 43.333,
-        -- epochOffset: not yet calibrated; manual click required on first session
+        epochOffset  = 13.265, -- single first-sync click (2026-05-02 PTR, BOTTOM segment, n=1); ~±2s precision from integer-second floor; refine with live realm clicks
         mapX         = 0,
         mapY         = 0,
         mapScale     = 1,
