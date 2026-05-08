@@ -50,7 +50,7 @@ local LIFTS = {
         riseTime         = 8.067, -- TransportAnimation 183169: 4.300s → 12.367s
         waitAtTop        = 5.700, -- TransportAnimation 183169: 12.367s → 18.067s
         cycleTime        = 25.0,
-        epochOffset      = 13.95, -- circular mean of 59 calibration clicks, sd 1.27s, span 5 days
+        epochOffset      = 12.77, -- circular mean of 11 clicks (2026-04-25..2026-05-04), circ_sd 0.84s; sync_corrections.csv + SV
         mapX             = 0.4169,
         mapY             = 0.3860,
         mapScale         = 1200, -- approximate zone width in yards
@@ -75,7 +75,7 @@ local LIFTS = {
         waitAtTop        = 5.667,  -- TransportAnimation 184330: 12.333s → 18.000s
         waitAtBottom     = 4.333,  -- TransportAnimation 184330: 0s → 4.333s
         cycleTime        = 25.0,
-        epochOffset      = 11.5,   -- FALL events at serverTime%25≈11.5 (n=3, syncLog 04-10)
+        epochOffset      = 15.88,  -- circular mean of 7 clicks (2026-05-05), circ_sd 0.16s; sync_corrections.csv (most-recent session; Apr 10 mean 14.76 and Apr 13 mean 12.76 indicate ~1s/wk drift)
         mapX             = 0.426,
         mapY             = 0.336,
         mapScale         = 1200,
