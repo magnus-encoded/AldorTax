@@ -407,7 +407,7 @@ local APPROACH_WARNING_TIME = 10.0
 local CLICK_REACTION_TIME   = 0.2
 
 local ADDON_PREFIX          = "ALDORTAX"
-local MSG_VERSION           = 5
+local MSG_VERSION           = 6
 local SOFT_BLOCK_THRESHOLD  = 3
 local HARD_BLOCK_THRESHOLD  = 6
 
@@ -884,9 +884,10 @@ local function BroadcastSync(liftID, realTime)
     local phase    = rt % def.cycleTime
     -- origin: "C" if we calibrated this ourselves, "R" if relaying someone else's sync
     local origin   = (realTime or not st.lastSyncSource) and "C" or "R"
-    -- Server-time phase: shared ground truth across all clients regardless of local clock
-    local absRT    = realTime and (realTime - realTimeOffset + (serverTimeOffset or 0))
-        or GetAbsoluteTime()
+    -- Server-time phase represents the absolute server time at which the cycle
+    -- started, mod cycleTime. Convert rt (in real time) to absolute server time
+    -- so relays/auto-rebroadcasts carry the original cycle-start, not "now".
+    local absRT    = (rt - (realTimeOffset or 0)) + (serverTimeOffset or 0)
     local srvPhase = absRT % def.cycleTime
     -- v5: S|ver|liftID|phase|name|realm|fall|bottom|rise|top|origin|srvPhase
     -- phase (field 3) kept for v3/v4 compat; v5 receivers prefer srvPhase (field 11)
@@ -969,6 +970,9 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
         return
     end
 
+    -- v6: same wire format as v5; bumped to identify clients with the fixed
+    --     BroadcastSync srvPhase math (relays/auto-rebroadcasts no longer
+    --     emit "now mod cycle" instead of cycle-start mod cycle).
     -- v5: S|ver|liftID|phase|name|realm|fall|bottom|rise|top|origin|srvPhase
     -- v4: S|ver|liftID|phase|name|realm|fall|bottom|rise|top
     -- v3: S|ver|phase|name|realm|fall|bottom|rise|top  (assumed aldor)
@@ -984,7 +988,7 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
             rise     = tonumber(parts[8])
             top      = tonumber(parts[9])
             origin   = parts[10] or "C"    -- v4 has no origin field; assume calibrated
-            srvPhase = tonumber(parts[11]) -- v5 only; nil for v4
+            srvPhase = tonumber(parts[11]) -- v5+; nil for v4
         elseif ver >= 3 and #parts >= 4 then
             liftID = "aldor"
             phase  = tonumber(parts[2])
