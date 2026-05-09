@@ -246,6 +246,53 @@ local clickPhase = clickElapsed % cycleTime
 assert_near(clickPhase, 0.2, 0.15, "CLICK_REACTION_TIME should appear once, not twice")
 
 
+-- ─── Test 7: Receive guard accepts v3/v5/v6, rejects v7 ─────────────────────
+-- v0.9.1 bumped MSG_VERSION 5 → 6 with no wire-format change. The receive
+-- guard must accept all known versions (v3..v6 share the parse path) and
+-- reject anything outside that set.
+
+section("Test 7: Receive guard known-version coverage")
+
+MockAPI.SetLatency(0, 0)
+
+-- Clear any prior soft-block state by switching to a fresh sender realm
+-- (BadPlayer-TestRealm is soft-blocked from Test 5).
+
+-- Acceptance signal: lastSyncSource.name is updated on every accepted sync.
+-- Using the stored sender name avoids false-negatives when two consecutive
+-- messages compute identical lastSyncRealTime (same phase + clock).
+
+-- v3 message — implicit aldor, no liftID, no origin, no srvPhase.
+local v3Phase = GetServerTime() % cycleTime
+local v3Msg = string.format("S|3|%.3f|V3Sender|TestRealm|6.500|4.700|7.800|6.000", v3Phase)
+
+MockAPI.ReceiveAddonMessage("ALDORTAX", v3Msg, "CHANNEL", "V3Sender")
+assert_true(AldorTaxDB.lifts.aldor.lastSyncSource
+    and AldorTaxDB.lifts.aldor.lastSyncSource.name == "V3Sender",
+    "v3 sync accepted")
+
+-- v6 message — same wire format as v5, just a client identifier bump.
+local v6Phase = GetServerTime() % cycleTime
+local v6Msg = string.format("S|6|aldor|%.3f|V6Sender|TestRealm|6.500|4.700|7.800|6.000|C|%.3f",
+    v6Phase, v6Phase)
+
+MockAPI.ReceiveAddonMessage("ALDORTAX", v6Msg, "CHANNEL", "V6Sender")
+assert_true(AldorTaxDB.lifts.aldor.lastSyncSource
+    and AldorTaxDB.lifts.aldor.lastSyncSource.name == "V6Sender",
+    "v6 sync accepted")
+
+-- v7 message — must be rejected by the receive guard. After this call
+-- lastSyncSource.name should still be "V6Sender" from the previous accept.
+local v7Phase = GetServerTime() % cycleTime
+local v7Msg = string.format("S|7|aldor|%.3f|V7Sender|TestRealm|6.500|4.700|7.800|6.000|C|%.3f",
+    v7Phase, v7Phase)
+
+MockAPI.ReceiveAddonMessage("ALDORTAX", v7Msg, "CHANNEL", "V7Sender")
+assert_true(AldorTaxDB.lifts.aldor.lastSyncSource
+    and AldorTaxDB.lifts.aldor.lastSyncSource.name == "V6Sender",
+    "v7 sync rejected (lastSyncSource unchanged from prior v6 accept)")
+
+
 -- ─── Results ────────────────────────────────────────────────────────────────
 
 H.results()

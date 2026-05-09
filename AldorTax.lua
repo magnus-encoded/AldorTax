@@ -408,6 +408,9 @@ local CLICK_REACTION_TIME   = 0.2
 
 local ADDON_PREFIX          = "ALDORTAX"
 local MSG_VERSION           = 6
+-- versions the receive guard accepts. Send side stays at MSG_VERSION; this set
+-- only governs what we'll parse. v3..v6 all share the same parse path.
+local KNOWN_MSG_VERSIONS    = { [3] = true, [4] = true, [5] = true, [6] = true }
 local SOFT_BLOCK_THRESHOLD  = 3
 local HARD_BLOCK_THRESHOLD  = 6
 
@@ -965,7 +968,9 @@ local function HandleAddonMessage(prefix, message, chatType, sender)
     for p in message:sub(3):gmatch("[^|]+") do parts[#parts + 1] = p end
 
     local ver = tonumber(parts[1])
-    if not ver or ver > MSG_VERSION then
+    -- accept v3, v4, v5, v6 — all share the same parse path; bump this when
+    -- a wire-format break (not just a client identifier bump) is introduced
+    if not ver or not KNOWN_MSG_VERSIONS[ver] then
         Log("|cffffff00AldorTax: ignoring message with unknown version " .. tostring(parts[1]) .. "|r")
         return
     end
