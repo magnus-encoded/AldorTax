@@ -2811,6 +2811,59 @@ BuildSyncUI = function()
 end
 
 
+-- ─── Fall UI (Phase 3 scaffold) ──────────────────────────────────────────────
+-- New module for fall lifts: Aldor Rise, Stormspire, SSC.
+-- Currently a parked frame so _G.AldorTaxFallUI resolves and the post-Phase-4
+-- spec can begin to assert against it. NOT wired to ReconfigureLift or
+-- UpdateSyncUIVisibility yet — that's Phase 5. Until then, the legacy
+-- BuildSyncUI / syncUI above remains the active surface for all lifts.
+--
+-- Display-mode taxonomy (see design brief, 2026-05-09):
+--   "full"    — near the lift: full segmented bar + sweep + sync button + tooltips.
+--   "compact" — settings.alwaysCompact OR mid-range approach: shorter bar, no sync btn.
+--   "light"   — far approach (60+ yd, "isApproaching"): countdown + tiny lift label,
+--               clickable for sync, no segments. Reduces clutter while traveling.
+
+local FallUI = {}
+
+local fallUI = CreateFrame("Frame", "AldorTaxFallUI", UIParent)
+fallUI:Hide()
+_G.AldorTaxFallUI = fallUI
+
+-- TODO Phase 3: Lazy-build chrome (backdrop, title, segmented bar, sweep cursor,
+-- sync button, ETA label, tooltips). Reconfigure layout for the given liftID
+-- (Aldor / Stormspire / SSC differ in segment count and cycle length). Apply
+-- the current display mode (see SetMode). Position from saved point, clamp to
+-- screen, and call fallUI:Show().
+function FallUI.Show(liftID)
+    -- no-op until Phase 3 build-out
+end
+
+-- TODO Phase 3: Hide the frame and release any per-lift transient state
+-- (curLiftID, cached segment positions, tooltip owner) so a later Show() with
+-- a different liftID rebuilds cleanly. This is the seam that fixes the
+-- state-leak in spec_post_phase4_ui_transitions.lua: Hide() must guarantee no
+-- segments or barBg widths bleed into the next configuration.
+function FallUI.Hide()
+    fallUI:Hide()
+end
+
+-- TODO Phase 3: Switch between "full" / "compact" / "light" layouts.
+--   - full:    show segments, sweep, sync button, title.
+--   - compact: hide segments, keep bar+sweep at reduced height, hide sync btn.
+--   - light:   hide bar entirely; show ETA countdown + tiny lift label,
+--              whole frame is a single click target (sync trigger).
+-- Resize the frame and re-anchor children; record _w/_h so the post-Phase-4
+-- spec can characterize layout stability.
+function FallUI.SetMode(mode)
+    -- no-op until Phase 3 build-out
+end
+
+fallUI.Show_FallUI = FallUI.Show
+fallUI.Hide_FallUI = FallUI.Hide
+fallUI.SetMode     = FallUI.SetMode
+
+
 -- ─── Dev panel ─────────────────────────────────────────────────────────────
 
 local devPanel
