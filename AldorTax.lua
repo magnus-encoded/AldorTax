@@ -227,6 +227,7 @@ end
 -- reagent = item ID required before Cata (nil if none).
 -- item    = consumable item to use (checked via GetItemCount).
 
+local PARACHUTE    = { item = 10684 } -- Colossal Parachute (Hailee, Feralas) — vendor-bought, no random effect
 local NOGGENFOGGER = { item = 8529, spell = "Noggenfogger Elixir" } -- last resort (costs gold, random effect)
 
 do
@@ -239,23 +240,28 @@ do
         MAGE        = {
             { spell = "Slow Fall", reagent = preCata and 17056 or nil },
             { spell = "Blink" },
+            PARACHUTE,
             NOGGENFOGGER,
         },
         PRIEST      = {
             { spell = "Levitate", reagent = preCata and 17056 or nil },
+            PARACHUTE,
             NOGGENFOGGER,
         },
         PALADIN     = {
             { spell = "Divine Shield" },
             { spell = "Blessing of Protection" },
+            PARACHUTE,
             NOGGENFOGGER,
         },
         HUNTER      = {
             { spell = "Disengage", minToc = 30000 }, -- resets fall in WotLK+; melee-only in TBC
+            PARACHUTE,
             NOGGENFOGGER,
         },
         WARRIOR     = {
             { spell = "Heroic Leap", minToc = 40000 }, -- Cata+
+            PARACHUTE,
             NOGGENFOGGER,
         },
         DEMONHUNTER = {
@@ -265,6 +271,7 @@ do
         MONK        = {
             { spell = "Zen Flight" },
             { spell = "Roll" },
+            PARACHUTE,
             NOGGENFOGGER,
         },
         EVOKER      = {
@@ -272,13 +279,14 @@ do
         },
         DRUID       = {
             { spell = "Cat Form" }, -- passive fall damage reduction
+            PARACHUTE,
             NOGGENFOGGER,
         },
         -- Classes with no mitigation get Noggenfogger as sole option
-        ROGUE       = { NOGGENFOGGER },
-        WARLOCK     = { NOGGENFOGGER },
-        SHAMAN      = { NOGGENFOGGER },
-        DEATHKNIGHT = { NOGGENFOGGER },
+        ROGUE       = { PARACHUTE, NOGGENFOGGER },
+        WARLOCK     = { PARACHUTE, NOGGENFOGGER },
+        SHAMAN      = { PARACHUTE, NOGGENFOGGER },
+        DEATHKNIGHT = { PARACHUTE, NOGGENFOGGER },
     }
 
     -- Strip saves that don't exist in this client version
@@ -1242,6 +1250,24 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
             if id then activeLiftID = id end
         end
     end
+    -- Fall-save alert: fires on any rising edge of IsFalling, anywhere. Runs
+    -- before the activeLiftID early-return so it works in zones with no lift
+    -- (e.g. Feralas), and so zoning out can never strand the alert. The 4s
+    -- auto-dismiss bounds the on-screen time even if the falling-edge is missed.
+    if settings.fallSaveAlert then
+        local falling = IsFalling()
+        if falling and not wasFalling then
+            ShowFallSaveAlert()
+        end
+        if fallSaveShown and (not falling or now >= fallSaveHideAt) then
+            HideFallSaveAlert()
+        end
+        wasFalling = falling
+    elseif fallSaveShown then
+        HideFallSaveAlert()
+        wasFalling = false
+    end
+
     if not activeLiftID then return end
     local def = LIFTS[activeLiftID]
     local st  = liftState[activeLiftID]
@@ -1280,27 +1306,6 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         else
             warnFrame:Hide()
         end
-    end
-
-    -- Fall-save alert: detect freefall near a lift with a death zone
-    if settings.fallSaveAlert and def.deathZones then
-        local falling = IsFalling()
-        if falling and not wasFalling then
-            -- Rising edge: just started falling — only alert if near the lift
-            if st.isNearLift or st.isApproaching then
-                ShowFallSaveAlert()
-            end
-        elseif not falling and wasFalling then
-            HideFallSaveAlert()
-        end
-        wasFalling = falling
-        -- Auto-dismiss after timeout
-        if fallSaveShown and GetTime() >= fallSaveHideAt then
-            HideFallSaveAlert()
-        end
-    elseif fallSaveShown then
-        HideFallSaveAlert()
-        wasFalling = false
     end
 
     -- Auto-broadcast
