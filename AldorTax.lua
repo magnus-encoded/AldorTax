@@ -189,7 +189,7 @@ local LIFTS = {
         waitAtTop     = 5.50,
         waitAtBottom  = 5.50,
         cycleTime     = 30.00,
-        epochOffset   = 12.54, -- circular mean of "South arrives" first-sync clicks: 13.5 (2026-04-22), 11.6 (2026-04-23), n=2, sd≈1s
+        epochOffset   = 12.35, -- circular mean of South settled clicks 2026-04-22..2026-05-07: 13.49, 11.59, 11.99 (n=3, sd≈0.82). A second cluster at 22.9/23.6/24.9 (n=3, ~11.5s offset) appears on other sessions — possibly a different physical platform or mis-identified bar; not folded in. Revisit with more data + dualOffset audit.
         mapX          = 0.318,
         mapY          = 0.626,
         mapScale      = 1000,
