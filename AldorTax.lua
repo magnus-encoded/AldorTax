@@ -2811,52 +2811,420 @@ BuildSyncUI = function()
 end
 
 
--- ─── Fall UI (Phase 3 scaffold) ──────────────────────────────────────────────
--- New module for fall lifts: Aldor Rise, Stormspire, SSC.
--- Currently a parked frame so _G.AldorTaxFallUI resolves and the post-Phase-4
--- spec can begin to assert against it. NOT wired to ReconfigureLift or
--- UpdateSyncUIVisibility yet — that's Phase 5. Until then, the legacy
--- BuildSyncUI / syncUI above remains the active surface for all lifts.
+-- ─── Fall UI (Phase 3) ───────────────────────────────────────────────────────
+-- Module for fall lifts: Aldor Rise, Stormspire, SSC.
+-- NOT yet wired to ReconfigureLift or UpdateSyncUIVisibility — that's Phase 5.
+-- Until then, the legacy BuildSyncUI / syncUI above remains the active surface
+-- for all lifts; this frame is built on demand and addressable via the public
+-- FallUI.Show / Hide / SetMode API plus the global _G.AldorTaxFallUI.
 --
--- Display-mode taxonomy (see design brief, 2026-05-09):
---   "full"    — near the lift: full segmented bar + sweep + sync button + tooltips.
---   "compact" — settings.alwaysCompact OR mid-range approach: shorter bar, no sync btn.
---   "light"   — far approach (60+ yd, "isApproaching"): countdown + tiny lift label,
---               clickable for sync, no segments. Reduces clutter while traveling.
+-- Dual-perspective walkthrough (2026-05-11):
+--
+--   WORLD (what the player already sees): Standing on Aldor Rise, the lift
+--   platform is visible at the south edge of the disc — the player can see
+--   the cables and the timber platform, hear the creaking on cycle, and watch
+--   it rise or fall. From the Terrace of Light they can still see the cables
+--   but not the platform itself. From across Shattrath they can't see it at
+--   all. The Stormspire and SSC variants are similar: near the doorway you
+--   can see the elevator chamber and hear the door; mid-range you only know
+--   the structure is there. Standing on a fall lift, the player's facing
+--   already tells them which way is down. The world gives geometry,
+--   architecture, audio cues, and rough timing-by-eye.
+--
+--   ADDON (what only we know): The exact phase boundary — when the platform
+--   crosses from FALL into BOTTOM (the dwell window where it's safe to step
+--   on without falling damage), or from RISE into TOP (the dwell at top
+--   that's safe to step off). The precise countdown to that transition.
+--   Who in the broadcast group anchored the sync, so the player knows the
+--   timing is shared. None of that is visible from the world: the platform
+--   looks the same in the last 0.5s of FALL and the first 0.5s of BOTTOM,
+--   but the consequence of stepping on differs by tens of meters of fall
+--   damage. The Fall UI's job is to surface only that hidden phase
+--   information, and to do so progressively: dense (segmented bar + sweep)
+--   when the player is on the platform deciding *now*, minimal (lift name
+--   + ETA) when they're walking toward it and only need to know roughly
+--   when the next cycle starts.
+--
+-- Display-mode taxonomy:
+--   "full"    — near the lift: full segmented bar + sweep + sync button +
+--               tooltips. The dense surface for the decision moment.
+--   "compact" — settings.alwaysCompact OR mid-range approach: shorter bar,
+--               same segments + sweep, no sync btn. Lower footprint while
+--               still surfacing the phase.
+--   "light"   — far approach (60+ yd, "isApproaching"): countdown + tiny
+--               lift label, no segments. Whole frame is a single click
+--               target (sync trigger).
 
 local FallUI = {}
 
-local fallUI = CreateFrame("Frame", "AldorTaxFallUI", UIParent)
+local FALLUI_BAR_W_FULL    = 460
+local FALLUI_BAR_W_COMPACT = 280
+local FALLUI_BAR_H_FULL    = 28
+local FALLUI_BAR_H_COMPACT = 22
+local FALLUI_PAD           = 12
+local FALLUI_SEG_NAMES     = { "FALL", "BOTTOM", "RISE", "TOP" }
+
+-- Frame size derived from bar + chrome padding.
+-- Full   : title row (20) + bar (28+4) + sync btn (24) + footer pad → ~94
+-- Compact: title row (20) + bar (22+4) + footer pad           → ~56
+-- Light  : title-as-label row + tiny lift name (single fontstring) → ~36
+local FALLUI_FRAME_H_FULL    = 94
+local FALLUI_FRAME_H_COMPACT = 56
+local FALLUI_FRAME_H_LIGHT   = 36
+local FALLUI_FRAME_W_LIGHT   = 160
+
+local fallUI = CreateFrame("Frame", "AldorTaxFallUI", UIParent, "BackdropTemplate")
 fallUI:Hide()
+fallUI:SetSize(FALLUI_BAR_W_FULL + FALLUI_PAD * 2, FALLUI_FRAME_H_FULL)
+fallUI:SetFrameStrata("MEDIUM")
+fallUI:SetMovable(true)
+fallUI:SetClampedToScreen(true)
+fallUI:EnableMouse(true)
+fallUI:RegisterForDrag("LeftButton")
+fallUI:SetScript("OnDragStart", fallUI.StartMoving)
+fallUI:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+    if AldorTaxDB then
+        local point, _, relPoint, x, y = self:GetPoint(1)
+        AldorTaxDB.fallUIPos = { point = point, relPoint = relPoint, x = x, y = y }
+    end
+end)
+fallUI:SetBackdrop({
+    bgFile   = "Interface/ChatFrame/ChatFrameBackground",
+    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+    tile     = true,
+    tileSize = 16,
+    edgeSize = 14,
+    insets   = { left = 3, right = 3, top = 3, bottom = 3 },
+})
+fallUI:SetBackdropColor(0.04, 0.04, 0.07, 0.92)
+fallUI:SetBackdropBorderColor(0.40, 0.36, 0.22, 0.70)
 _G.AldorTaxFallUI = fallUI
 
--- TODO Phase 3: Lazy-build chrome (backdrop, title, segmented bar, sweep cursor,
--- sync button, ETA label, tooltips). Reconfigure layout for the given liftID
--- (Aldor / Stormspire / SSC differ in segment count and cycle length). Apply
--- the current display mode (see SetMode). Position from saved point, clamp to
--- screen, and call fallUI:Show().
-function FallUI.Show(liftID)
-    -- no-op until Phase 3 build-out
+-- Build chrome lazily on first Show.
+local function FallUI_Build()
+    if fallUI.built then return end
+
+    -- Default position (only on first build, before SavedVariables consult).
+    if AldorTaxDB and AldorTaxDB.fallUIPos then
+        local p = AldorTaxDB.fallUIPos
+        fallUI:ClearAllPoints()
+        fallUI:SetPoint(p.point, UIParent, p.relPoint, p.x, p.y)
+    else
+        fallUI:ClearAllPoints()
+        fallUI:SetPoint("TOP", UIParent, "TOP", 0, -160)
+    end
+
+    -- Title (top-left, gold)
+    local title = fallUI:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    title:SetPoint("TOPLEFT", FALLUI_PAD, -7)
+    title:SetTextColor(1, 0.82, 0)
+    fallUI.title = title
+
+    -- Source label (top-right, dim gray) — sync source / "no sync"
+    local sourceLabel = fallUI:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    sourceLabel:SetPoint("TOPRIGHT", -FALLUI_PAD, -7)
+    sourceLabel:SetText("no sync")
+    sourceLabel:SetTextColor(0.6, 0.6, 0.6)
+    fallUI.sourceLabel = sourceLabel
+
+    -- Bar background (chrome around the segmented bar)
+    local barBg = CreateFrame("Frame", nil, fallUI, "BackdropTemplate")
+    barBg:SetPoint("TOPLEFT", FALLUI_PAD - 2, -24)
+    barBg:SetSize(FALLUI_BAR_W_FULL + 4, FALLUI_BAR_H_FULL + 4)
+    barBg:SetBackdrop({
+        bgFile   = "Interface/ChatFrame/ChatFrameBackground",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        tile     = true,
+        tileSize = 8,
+        edgeSize = 8,
+        insets   = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    barBg:SetBackdropColor(0.02, 0.02, 0.04, 0.90)
+    barBg:SetBackdropBorderColor(0.12, 0.12, 0.16, 0.70)
+    barBg._w = FALLUI_BAR_W_FULL + 4
+    fallUI.barBg = barBg
+
+    -- Bar frame holding the 4 segment buttons
+    local bar = CreateFrame("Frame", nil, fallUI)
+    bar:SetSize(FALLUI_BAR_W_FULL, FALLUI_BAR_H_FULL)
+    bar:SetPoint("TOPLEFT", FALLUI_PAD, -26)
+    fallUI.bar = bar
+
+    local segBtns     = {}
+    local segTextures = {}
+    fallUI.segBtns     = segBtns
+    fallUI.segTextures = segTextures
+
+    for i = 1, 4 do
+        local segBtn = CreateFrame("Button", nil, bar)
+        segBtn:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+        segBtn:SetSize(1, FALLUI_BAR_H_FULL)
+        segBtns[i] = segBtn
+
+        local tex = segBtn:CreateTexture(nil, "ARTWORK")
+        tex:SetAllPoints()
+        segTextures[i] = tex
+        segBtn:SetHighlightTexture("Interface/Buttons/ButtonHilight-Square", "ADD")
+
+        local borderL = segBtn:CreateTexture(nil, "BORDER")
+        borderL:SetColorTexture(0, 0, 0, 0.70)
+        borderL:SetPoint("TOPLEFT"); borderL:SetPoint("BOTTOMLEFT"); borderL:SetWidth(1)
+        local borderR = segBtn:CreateTexture(nil, "BORDER")
+        borderR:SetColorTexture(0, 0, 0, 0.70)
+        borderR:SetPoint("TOPRIGHT"); borderR:SetPoint("BOTTOMRIGHT"); borderR:SetWidth(1)
+        local borderT = segBtn:CreateTexture(nil, "BORDER")
+        borderT:SetColorTexture(0, 0, 0, 0.70)
+        borderT:SetPoint("TOPLEFT"); borderT:SetPoint("TOPRIGHT"); borderT:SetHeight(1)
+        local borderB = segBtn:CreateTexture(nil, "BORDER")
+        borderB:SetColorTexture(0, 0, 0, 0.70)
+        borderB:SetPoint("BOTTOMLEFT"); borderB:SetPoint("BOTTOMRIGHT"); borderB:SetHeight(1)
+
+        local phaseIdx = i - 1
+        segBtn:SetScript("OnClick", function()
+            local liftID = fallUI.curLiftID
+            if not liftID then return end
+            local def = LIFTS[liftID]
+            if not def then return end
+            local starts = {
+                [0] = 0,
+                def.fallTime,
+                def.fallTime + def.waitAtBottom,
+                def.fallTime + def.waitAtBottom + def.riseTime,
+            }
+            PerformCalibrationClick(liftID, starts[phaseIdx], FALLUI_SEG_NAMES[i])
+        end)
+
+        segBtn:SetScript("OnEnter", function(self)
+            local liftID = fallUI.curLiftID
+            if not liftID then return end
+            local def = LIFTS[liftID]
+            if not def then return end
+            local durs = { def.fallTime, def.waitAtBottom, def.riseTime, def.waitAtTop }
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(FALLUI_SEG_NAMES[i], 1, 0.82, 0, 1)
+            GameTooltip:AddLine(string.format("%.1fs — click to sync at this phase", durs[i]),
+                0.85, 0.85, 0.85, true)
+            GameTooltip:Show()
+        end)
+        segBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    -- Overlay holding the sweep cursor + glow + per-segment phase labels
+    local overlay = CreateFrame("Frame", nil, fallUI)
+    overlay:SetSize(FALLUI_BAR_W_FULL, FALLUI_BAR_H_FULL)
+    overlay:SetPoint("TOPLEFT", FALLUI_PAD, -26)
+    overlay:SetFrameLevel(bar:GetFrameLevel() + 10)
+    fallUI.overlay = overlay
+
+    local phaseLabels = {}
+    for i = 1, 4 do
+        local lbl = overlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetText(FALLUI_SEG_NAMES[i])
+        lbl:SetTextColor(1, 1, 1, 0.9)
+        phaseLabels[i] = lbl
+    end
+    fallUI.phaseLabels = phaseLabels
+
+    local cursorGlow = overlay:CreateTexture(nil, "OVERLAY", nil, 1)
+    cursorGlow:SetColorTexture(1, 1, 1, 0.25)
+    cursorGlow:SetSize(10, FALLUI_BAR_H_FULL + 8)
+    cursorGlow:SetBlendMode("ADD")
+    cursorGlow:SetPoint("CENTER", overlay, "LEFT", 0, 0)
+    fallUI.cursorGlow = cursorGlow
+
+    local cursor = overlay:CreateTexture(nil, "OVERLAY", nil, 2)
+    cursor:SetColorTexture(1, 1, 1, 1)
+    cursor:SetSize(4, FALLUI_BAR_H_FULL + 6)
+    cursor:SetPoint("CENTER", overlay, "LEFT", 0, 0)
+    fallUI.cursor = cursor
+
+    local timeLabel = overlay:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    timeLabel:SetPoint("BOTTOM", cursor, "TOP", 0, 2)
+    timeLabel:SetShadowOffset(1, -1)
+    timeLabel:SetShadowColor(0, 0, 0, 1)
+    fallUI.timeLabel = timeLabel
+
+    -- Sync ("say warning") button — full mode only.
+    -- Mirrors syncUI.sayBtn (line ~2056). Plain UIPanelButtonTemplate; the
+    -- per-segment click handlers above already provide phase-specific sync.
+    -- This button is the "shout my current sync to /say" affordance, parallel
+    -- to the legacy panel's sayBtn so muscle memory carries over. Plain
+    -- OnClick (not secure) — PerformCalibrationClick / chat broadcast are
+    -- Lua-only, not combat-restricted.
+    local syncBtn = CreateFrame("Button", nil, fallUI, "UIPanelButtonTemplate")
+    syncBtn:SetSize(130, 24)
+    syncBtn:SetText("|cffffcc00Say Warning|r")
+    syncBtn:SetNormalFontObject("GameFontNormalSmall")
+    syncBtn:SetHighlightFontObject("GameFontHighlightSmall")
+    syncBtn:SetPoint("BOTTOM", fallUI, "BOTTOM", 0, 8)
+    syncBtn:SetScript("OnClick", function()
+        if _G.SlashCmdList and _G.SlashCmdList["ALDORTAX"] then
+            _G.SlashCmdList["ALDORTAX"]("say")
+        end
+    end)
+    syncBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Say warning in /say", 1, 0.82, 0, 1)
+        GameTooltip:Show()
+    end)
+    syncBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    fallUI.syncBtn = syncBtn
+
+    -- Light-mode label: covers the whole frame and is the click target.
+    -- Plain OnClick handler on the fallUI frame itself when in light mode
+    -- (set in SetMode). No secure binding needed — sync click is Lua-only.
+    local lightLabel = fallUI:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lightLabel:SetPoint("CENTER", fallUI, "CENTER", 0, 0)
+    lightLabel:SetTextColor(1, 0.82, 0)
+    lightLabel:Hide()
+    fallUI.lightLabel = lightLabel
+
+    fallUI.built = true
 end
 
--- TODO Phase 3: Hide the frame and release any per-lift transient state
--- (curLiftID, cached segment positions, tooltip owner) so a later Show() with
--- a different liftID rebuilds cleanly. This is the seam that fixes the
--- state-leak in spec_post_phase4_ui_transitions.lua: Hide() must guarantee no
--- segments or barBg widths bleed into the next configuration.
+-- Recompute segment widths for the current liftID + bar width.
+-- Called from Show and SetMode; never caches past Hide.
+local function FallUI_LayoutSegments(barW, barH)
+    local liftID = fallUI.curLiftID
+    if not liftID then return end
+    local def = LIFTS[liftID]
+    if not def then return end
+
+    local durs = { def.fallTime, def.waitAtBottom, def.riseTime, def.waitAtTop }
+    local cycle = def.cycleTime
+    local x = 0
+    for i = 1, 4 do
+        local w = (durs[i] / cycle) * barW
+        local segBtn = fallUI.segBtns[i]
+        segBtn:ClearAllPoints()
+        segBtn:SetPoint("TOPLEFT", fallUI.bar, "TOPLEFT", x, 0)
+        segBtn:SetSize(w, barH)
+
+        local c = def.segColors[i]
+        fallUI.segTextures[i]:SetColorTexture(c.r, c.g, c.b, 1)
+
+        -- Phase label centered in segment
+        local lbl = fallUI.phaseLabels[i]
+        lbl:ClearAllPoints()
+        lbl:SetPoint("CENTER", fallUI.overlay, "LEFT", x + w / 2, 0)
+
+        x = x + w
+    end
+end
+
+function FallUI.Show(liftID)
+    if not liftID or not LIFTS[liftID] then return end
+    FallUI_Build()
+
+    fallUI.curLiftID = liftID
+    local def = LIFTS[liftID]
+    fallUI.title:SetText(def.displayName .. "  |cff888888click segment to sync|r")
+    fallUI.lightLabel:SetText(def.displayName)
+
+    -- Apply current mode (defaults to "full"); SetMode resizes the bar /
+    -- frame and calls LayoutSegments so widths recompute every Show().
+    FallUI.SetMode(fallUI._mode or "full")
+    fallUI:Show()
+end
+
 function FallUI.Hide()
     fallUI:Hide()
+    -- Release per-lift transient state so the next Show() rebuilds layout
+    -- from scratch. Without this, a Show("stormspire") after a Show("aldor")
+    -- → Hide() → Show("aldor") could leak stormspire's segment widths into
+    -- the aldor layout (spec_post_phase4_ui_transitions.lua characterizes
+    -- this round-trip).
+    fallUI.curLiftID = nil
+    -- Reset cached barBg width; LayoutSegments will repopulate via SetMode.
+    if fallUI.barBg then fallUI.barBg._w = 0 end
 end
 
--- TODO Phase 3: Switch between "full" / "compact" / "light" layouts.
---   - full:    show segments, sweep, sync button, title.
---   - compact: hide segments, keep bar+sweep at reduced height, hide sync btn.
---   - light:   hide bar entirely; show ETA countdown + tiny lift label,
---              whole frame is a single click target (sync trigger).
--- Resize the frame and re-anchor children; record _w/_h so the post-Phase-4
--- spec can characterize layout stability.
 function FallUI.SetMode(mode)
-    -- no-op until Phase 3 build-out
+    if mode ~= "full" and mode ~= "compact" and mode ~= "light" then
+        mode = "full"
+    end
+    fallUI._mode = mode
+    if not fallUI.built then return end
+
+    if mode == "light" then
+        -- Hide segmented bar entirely; show only lift name (lightLabel).
+        -- Whole frame is the click target — wire OnMouseUp to broadcast sync.
+        fallUI:SetSize(FALLUI_FRAME_W_LIGHT, FALLUI_FRAME_H_LIGHT)
+        fallUI.title:Hide()
+        fallUI.sourceLabel:Hide()
+        fallUI.barBg:Hide()
+        fallUI.bar:Hide()
+        fallUI.overlay:Hide()
+        fallUI.syncBtn:Hide()
+        for i = 1, 4 do fallUI.segBtns[i]:Hide() end
+        fallUI.lightLabel:Show()
+        fallUI.barBg._w = 0
+
+        fallUI:SetScript("OnMouseUp", function(self, button)
+            if button == "LeftButton" and not self.isMoving then
+                local liftID = fallUI.curLiftID
+                if not liftID then return end
+                -- Sync at FALL boundary (phase 0). Cheapest, no cursor needed.
+                PerformCalibrationClick(liftID, 0, "FALL (light)")
+            end
+        end)
+
+        fallUI._w = FALLUI_FRAME_W_LIGHT
+        fallUI._h = FALLUI_FRAME_H_LIGHT
+        return
+    end
+
+    fallUI:SetScript("OnMouseUp", nil)
+
+    local barW, barH, frameH
+    if mode == "compact" then
+        barW   = FALLUI_BAR_W_COMPACT
+        barH   = FALLUI_BAR_H_COMPACT
+        frameH = FALLUI_FRAME_H_COMPACT
+    else -- full
+        barW   = FALLUI_BAR_W_FULL
+        barH   = FALLUI_BAR_H_FULL
+        frameH = FALLUI_FRAME_H_FULL
+    end
+
+    local frameW = barW + FALLUI_PAD * 2
+    fallUI:SetSize(frameW, frameH)
+
+    fallUI.title:Show()
+    fallUI.sourceLabel:Show()
+    fallUI.lightLabel:Hide()
+    fallUI.barBg:Show()
+    fallUI.bar:Show()
+    fallUI.overlay:Show()
+    for i = 1, 4 do fallUI.segBtns[i]:Show() end
+
+    fallUI.barBg:ClearAllPoints()
+    fallUI.barBg:SetPoint("TOPLEFT", FALLUI_PAD - 2, -24)
+    fallUI.barBg:SetSize(barW + 4, barH + 4)
+    fallUI.barBg._w = barW + 4
+
+    fallUI.bar:SetSize(barW, barH)
+    fallUI.bar:ClearAllPoints()
+    fallUI.bar:SetPoint("TOPLEFT", FALLUI_PAD, -26)
+
+    fallUI.overlay:SetSize(barW, barH)
+    fallUI.overlay:ClearAllPoints()
+    fallUI.overlay:SetPoint("TOPLEFT", FALLUI_PAD, -26)
+
+    fallUI.cursor:SetSize(4, barH + 6)
+    fallUI.cursorGlow:SetSize(10, barH + 8)
+
+    if mode == "full" then
+        fallUI.syncBtn:Show()
+    else
+        fallUI.syncBtn:Hide()
+    end
+
+    FallUI_LayoutSegments(barW, barH)
+
+    fallUI._w = frameW
+    fallUI._h = frameH
 end
 
 fallUI.Show_FallUI = FallUI.Show
