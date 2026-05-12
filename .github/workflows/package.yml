@@ -24,3 +24,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: AldorTax-${{ github.ref_name }}.zip
+
+      - name: Notify CurseForge
+        env:
+          CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+        run: |
+          curl --fail -X POST "https://www.curseforge.com/api/projects/1491850/package?token=$CURSEFORGE_TOKEN"
