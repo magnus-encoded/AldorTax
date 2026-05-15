@@ -1,0 +1,25 @@
+name: Debug CurseForge
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe CurseForge package endpoint
+        env:
+          CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+        run: |
+          if [ -z "$CURSEFORGE_TOKEN" ]; then
+            echo "CURSEFORGE_TOKEN secret is empty"
+            exit 1
+          fi
+          echo "Token length: ${#CURSEFORGE_TOKEN}"
+          echo "Token prefix: ${CURSEFORGE_TOKEN:0:4}..."
+          echo
+          echo "POST https://www.curseforge.com/api/projects/1491850/package"
+          echo
+          curl -sS -i -X POST \
+            "https://www.curseforge.com/api/projects/1491850/package?token=$CURSEFORGE_TOKEN" \
+            | head -50
