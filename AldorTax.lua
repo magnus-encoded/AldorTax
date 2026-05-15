@@ -1249,6 +1249,7 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 sscSuppressed = false
             end
             if syncUI then syncUI:Hide() end
+            warnFrame:Hide()
             -- Final broadcast as we leave
             if activeLiftID and liftState[activeLiftID].lastSync > 0 then
                 BroadcastSync(activeLiftID)
@@ -1289,7 +1290,10 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         wasFalling = false
     end
 
-    if not activeLiftID then return end
+    if not activeLiftID then
+        warnFrame:Hide()
+        return
+    end
     local def = LIFTS[activeLiftID]
     local st  = liftState[activeLiftID]
     if doProximity then
@@ -1312,7 +1316,8 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         local timeUntilNextDrop = def.cycleTime - progress
 
         local uiVisible         = (syncUI and syncUI:IsShown()) or settings.alwaysShowUI
-        if uiVisible then
+        local warnSuppressed    = sessionDismissed[activeLiftID] or sscSuppressed
+        if uiVisible or warnSuppressed then
             warnFrame:Hide()
         elseif status == "on_platform" and timeUntilNextDrop <= def.waitAtTop then
             warnFrame:Show()
