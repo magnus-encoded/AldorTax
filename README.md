@@ -38,7 +38,7 @@ The Great Lift is disabled on clients where it no longer exists (Cataclysm+).
 
 Click a phase segment on the tracking bar when you see the transport reach that point. A 200ms reaction offset is applied automatically. Your sync is broadcast to nearby players via General/Guild and party/raid.
 
-The UI switches between a full panel (when near the transport) and a compact view (when approaching).
+The UI shows a full panel when you're near the transport and a compact view when approaching. Click the X to dismiss; it reappears next time you enter the zone.
 
 ## Slash Commands
 

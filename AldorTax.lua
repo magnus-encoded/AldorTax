@@ -50,7 +50,7 @@ local LIFTS = {
         riseTime         = 8.067, -- TransportAnimation 183169: 4.300s → 12.367s
         waitAtTop        = 5.700, -- TransportAnimation 183169: 12.367s → 18.067s
         cycleTime        = 25.0,
-        epochOffset      = 12.77, -- circular mean of 11 clicks (2026-04-25..2026-05-04), circ_sd 0.84s; sync_corrections.csv + SV
+        epochOffset      = 7.0, -- latest live sync 2026-05-12 (lastSyncRealTime % cycleTime ≈ 6.947)
         mapX             = 0.4169,
         mapY             = 0.3860,
         mapScale         = 1200, -- approximate zone width in yards
@@ -158,12 +158,11 @@ local LIFTS = {
         riseTime     = 13.333,  -- TransportAnimation 183407: 30.000s → 43.333s
         waitAtTop    = 8.5,     -- TransportAnimation 183407: 0s → 8.500s (includes door)
         cycleTime    = 43.333,
-        epochOffset  = 13.265, -- single first-sync click (2026-05-02 PTR, BOTTOM segment, n=1); ~±2s precision from integer-second floor; refine with live realm clicks
+        epochOffset  = 31, -- mean of n=16 2026-05-15 (σ≈0.59s); TOP/BOTTOM more reliable than FALL/RISE
         mapX         = 0,
         mapY         = 0,
         mapScale     = 1,
         nearYards      = 999,  -- subzone detection only
-        hideAfterEntry = 70,   -- hide UI 70s after a live zone entry; never show on res
         zones        = {
             ["Coilfang: Serpentshrine Cavern"] = true,
             ["Serpentshrine Cavern"] = true
@@ -451,8 +450,10 @@ local ZONE_SEND_COOLDOWN       = 5   -- seconds after zoning before we send addo
 local zonedInAt                = 0   -- GetTime() when we last zoned into a lift area
 local lastProximityCheck       = 0
 local PROXIMITY_CHECK_INTERVAL = 1.0
-local sscUIHideAt              = 0     -- GetTime() deadline for SSC UI auto-hide (0 = off)
-local sscSuppressed            = false -- true = don't show SSC UI this visit
+local sscSuppressed            = false -- true = don't show SSC UI this visit (ghost-mode only)
+-- Lifts the user has X-closed via the bar's close button. Cleared on
+-- ZONE_CHANGED_NEW_AREA so leaving and returning to the lift zone re-shows.
+local sessionDismissed         = {}
 
 -- User settings (persisted in AldorTaxDB.settings)
 local settings                 = {
@@ -463,12 +464,15 @@ local settings                 = {
     segmentInput     = false,
     alwaysShowUI     = false,
     alwaysCompact    = false,
+    -- Single-platform "fall" lifts default on — they're life-saving (mistime →
+    -- fall death). Multi-platform "decision-helper" lifts default off — they
+    -- inform timing but mistiming doesn't kill you. Opt in via settings.
     enableAldor      = true,
-    enableGreatLift  = true,
-    enableTram       = false,
+    enableStormspire = true,
+    enableSSC        = true,
+    enableGreatLift  = false,
     enableTBLift     = false,
-    enableStormspire = false,
-    enableSSC        = false,
+    enableTram       = false,
     fallSaveAlert    = false,
 }
 
@@ -1084,19 +1088,44 @@ local function UpdateSyncUIVisibility(liftID)
         configuredLiftID = liftID
     end
     local st = liftState[liftID]
-    if sscSuppressed then
+
+    -- Hard-hide conditions: user dismissed via X, or SSC ghost-mode suppression.
+    if sessionDismissed[liftID] or sscSuppressed then
         syncUI:Hide()
-    elseif settings.alwaysCompact then
+        return
+    end
+
+    -- Sticky-latch: once any show-condition fires this visit, st.latchShown
+    -- pins the bar visible until the user clicks X or ZONE_CHANGED_NEW_AREA
+    -- resets state. Removes the "walk away → bar disappears" behavior.
+    if settings.alwaysShowUI or settings.alwaysCompact
+        or st.isNearLift or st.isApproaching then
+        st.latchShown = true
+    end
+
+    if not st.latchShown then
+        syncUI:Hide()
+        return
+    end
+
+    -- Compact vs full mode: alwaysCompact always wins; otherwise pick by
+    -- current proximity, defaulting to full when latched-but-elsewhere.
+    if settings.alwaysCompact then
         syncUI:Show(); syncUI.SetCompact(true)
-    elseif settings.alwaysShowUI then
-        syncUI:Show(); syncUI.SetCompact(false)
-    elseif st.isNearLift then
+    elseif settings.alwaysShowUI or st.isNearLift then
         syncUI:Show(); syncUI.SetCompact(false)
     elseif st.isApproaching then
         syncUI:Show(); syncUI.SetCompact(true)
     else
-        syncUI:Hide()
+        syncUI:Show(); syncUI.SetCompact(false)
     end
+end
+
+local function DismissActiveLift()
+    if not activeLiftID then return end
+    sessionDismissed[activeLiftID] = true
+    liftState[activeLiftID].latchShown = nil
+    UpdateSyncUIVisibility(activeLiftID)
 end
 
 -- ─── Events ─────────────────────────────────────────────────────────────────
@@ -1188,6 +1217,12 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             DoEmote("THANK", sender)
         end
     elseif event == "ZONE_CHANGED" or event == "ZONE_CHANGED_INDOORS" or event == "ZONE_CHANGED_NEW_AREA" then
+        if event == "ZONE_CHANGED_NEW_AREA" then
+            -- Major zone transition resets X-button dismissals and the
+            -- sticky-latch state so re-entering a lift zone re-shows the bar.
+            wipe(sessionDismissed)
+            for _, s in pairs(liftState) do s.latchShown = nil end
+        end
         local newLiftID = DetectActiveLift()
         if newLiftID then
             if newLiftID ~= activeLiftID then
@@ -1196,19 +1231,12 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 end
                 local prevLiftID = activeLiftID
                 activeLiftID = newLiftID
-                -- SSC: decide whether to show UI this visit
+                -- SSC: suppress UI when entering as a ghost. The user dismisses
+                -- the bar manually via the X button now; no timed auto-hide.
                 if newLiftID == "ssc" and prevLiftID ~= "ssc" then
-                    if UnitIsGhost("player") then
-                        sscSuppressed = true
-                        sscUIHideAt   = 0
-                    else
-                        sscSuppressed = false
-                        local hideDelay = LIFTS.ssc.hideAfterEntry or 0
-                        sscUIHideAt   = hideDelay > 0 and (GetTime() + hideDelay) or 0
-                    end
+                    sscSuppressed = UnitIsGhost("player") and true or false
                 elseif prevLiftID == "ssc" then
                     sscSuppressed = false
-                    sscUIHideAt   = 0
                 end
             end
             local def        = LIFTS[activeLiftID]
@@ -1219,7 +1247,6 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         else
             if activeLiftID == "ssc" then
                 sscSuppressed = false
-                sscUIHideAt   = 0
             end
             if syncUI then syncUI:Hide() end
             -- Final broadcast as we leave
@@ -1235,12 +1262,6 @@ end)
 
 logicFrame:SetScript("OnUpdate", function(self, elapsed)
     local now = GetTime()
-    -- SSC auto-hide: expire the timer and suppress further shows
-    if sscUIHideAt > 0 and now >= sscUIHideAt then
-        sscUIHideAt   = 0
-        sscSuppressed = true
-        if syncUI and syncUI:IsShown() then syncUI:Hide() end
-    end
     local doProximity = now - lastProximityCheck >= PROXIMITY_CHECK_INTERVAL
     if doProximity then
         lastProximityCheck = now
@@ -1470,9 +1491,18 @@ BuildSyncUI = function()
     title:SetTextColor(1, 0.82, 0)
     syncUI.title = title
 
+    -- ── Close button ────────────────────────────────────────────────────────
+    -- Dismisses the bar for this zone-visit. Cleared on ZONE_CHANGED_NEW_AREA.
+    local closeBtn = CreateFrame("Button", "AldorTaxSyncUIClose", syncUI, "UIPanelCloseButton")
+    closeBtn:SetSize(22, 22)
+    closeBtn:SetPoint("TOPRIGHT", 2, 2)
+    closeBtn:SetFrameLevel(syncUI:GetFrameLevel() + 20)
+    closeBtn:SetScript("OnClick", function() DismissActiveLift() end)
+    syncUI.closeBtn = closeBtn
+
     -- ── Source label ────────────────────────────────────────────────────────
     local sourceLabel = syncUI:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    sourceLabel:SetPoint("TOPRIGHT", -PAD, -7)
+    sourceLabel:SetPoint("TOPRIGHT", closeBtn, "TOPLEFT", -2, -3)
     sourceLabel:SetText("no sync")
     sourceLabel:SetTextColor(0.6, 0.6, 0.6)
     syncUI.sourceLabel = sourceLabel
