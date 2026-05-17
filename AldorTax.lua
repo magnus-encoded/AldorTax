@@ -330,9 +330,16 @@ local fallSaveNoSpell = fallSaveFrame:CreateFontString(nil, "OVERLAY", "GameFont
 fallSaveNoSpell:SetPoint("CENTER")
 fallSaveNoSpell:SetTextColor(1, 0, 0)
 
-local fallSaveShown  = false -- true while the alert is visible
-local fallSaveHideAt = 0     -- GetTime() when we auto-dismiss
-local wasFalling     = false -- edge detection for IsFalling()
+local fallSaveShown   = false -- true while the alert is visible
+local fallSaveHideAt  = 0     -- GetTime() when we auto-dismiss
+local wasFalling      = false -- edge detection for IsFalling()
+local fallStartedAt   = 0     -- GetTime() of the most recent falling rising-edge
+
+-- Falling-duration thresholds before we show the alert. Near a known lift
+-- area (activeLiftID set), show immediately. Otherwise wait 0.5s of sustained
+-- fall so small hops and stair-edge drops don't flash the alert.
+local FALL_SAVE_DELAY_NEAR = 0
+local FALL_SAVE_DELAY_AWAY = 0.5
 
 -- Find the best usable fall-save for the player's class.
 -- Returns name, texture, actionType ("spell" or "item")  or  nil, nil, nil
@@ -396,15 +403,22 @@ local function ShowFallSaveAlert()
         end
     end
     fallSaveFrame:SetAlpha(1)
+    fallSaveFrame:EnableMouse(true)
     fallSaveFrame:Show()
     fallSaveShown = true
     fallSaveHideAt = GetTime() + 4
 end
 
 local function HideFallSaveAlert()
-    if fallSaveShown then
+    if not fallSaveShown then return end
+    fallSaveShown = false
+    if InCombatLockdown() then
+        -- Protected SecureActionButton can't be :Hide()'d in combat; soft-hide.
+        -- The OnUpdate sweep finalizes a real :Hide() once combat ends.
+        fallSaveFrame:SetAlpha(0)
+        fallSaveFrame:EnableMouse(false)
+    else
         fallSaveFrame:Hide()
-        fallSaveShown = false
     end
 end
 
@@ -1272,17 +1286,31 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
             if id then activeLiftID = id end
         end
     end
-    -- Fall-save alert: fires on any rising edge of IsFalling, anywhere. Runs
-    -- before the activeLiftID early-return so it works in zones with no lift
-    -- (e.g. Feralas), and so zoning out can never strand the alert. The 4s
-    -- auto-dismiss bounds the on-screen time even if the falling-edge is missed.
+    -- Fall-save alert: fires after IsFalling sustains for a delay window.
+    -- Runs before the activeLiftID early-return so it works in zones with no
+    -- lift (e.g. Feralas) and so zoning out can never strand the alert.
+    -- The 4s auto-dismiss bounds on-screen time even if the falling-edge
+    -- is missed. Suppressed entirely in combat — protected frames can't be
+    -- safely shown/hidden mid-combat, and the player has bigger problems.
     if settings.fallSaveAlert then
-        local falling = IsFalling()
+        local falling  = IsFalling()
+        local inCombat = InCombatLockdown()
         if falling and not wasFalling then
-            ShowFallSaveAlert()
+            fallStartedAt = now
         end
-        if fallSaveShown and (not falling or now >= fallSaveHideAt) then
+        if falling and not fallSaveShown and not inCombat then
+            local delay = activeLiftID and FALL_SAVE_DELAY_NEAR or FALL_SAVE_DELAY_AWAY
+            if (now - fallStartedAt) >= delay then
+                ShowFallSaveAlert()
+            end
+        end
+        if fallSaveShown and (not falling or now >= fallSaveHideAt or inCombat) then
             HideFallSaveAlert()
+        end
+        -- Finalize the real :Hide() once combat ends and the soft-hidden
+        -- frame is no longer needed.
+        if not fallSaveShown and not inCombat and fallSaveFrame:IsShown() then
+            fallSaveFrame:Hide()
         end
         wasFalling = falling
     elseif fallSaveShown then
