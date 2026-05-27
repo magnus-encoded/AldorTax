@@ -1,8 +1,10 @@
 -- Shared addon namespace (WoW passes (addonName, NS) as varargs to each TOC
--- file). Wire.lua and SyncBus.lua load first and populate these.
-local _, NS = ...
-local Wire    = NS.Wire
-local SyncBus = NS.SyncBus
+-- file). Wire.lua, SyncBus.lua, and TransportCycle.lua load first and populate
+-- these.
+local _, NS          = ...
+local Wire           = NS.Wire
+local SyncBus        = NS.SyncBus
+local TransportCycle = NS.TransportCycle
 
 -- ─── Top-of-screen blink warning ─────────────────────────────────────────────
 
@@ -226,6 +228,12 @@ do
         LIFTS.greatlift = nil
     end
 end
+
+-- Expose the lift table for sibling modules. The widget layer (LiftBar /
+-- LightCountdown / TramUI, when wired in) reads defs through this seam
+-- rather than reaching for a file-local. Post-client-version filtering so
+-- consumers see the same view AldorTax.lua does.
+NS.LIFTS = LIFTS
 
 -- ─── Fall-save spells ───────────────────────────────────────────────────────
 -- Per-class abilities that can prevent fall death.  Ordered by priority:

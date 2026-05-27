@@ -6,6 +6,7 @@ local suites = {
     "tests/test_sync.lua",
     "tests/test_timing.lua",
     "tests/test_rebroadcast_bug.lua",
+    "tests/test_transport_cycle.lua",
 }
 
 local failed = false
