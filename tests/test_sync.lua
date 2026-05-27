@@ -16,7 +16,8 @@ local assert_near, assert_true, section = H.assert_near, H.assert_true, H.sectio
 MockAPI.SetClock(1775168000, 10000.0, 1775168000)
 MockAPI.SetZone("Shattrath City", "Aldor Rise")
 
-dofile("AldorTax.lua")
+local NS = H.LoadAddon()
+local Wire = NS.Wire
 
 -- ─── Initialize ─────────────────────────────────────────────────────────────
 
@@ -39,16 +40,16 @@ section("Test 1: Self-sync round-trip (zero latency)")
 MockAPI.ClearSentMessages()
 MockAPI.SetLatency(0, 0)
 
--- Construct the sync message as BroadcastSync would for a FALL click at "now"
--- We need to trigger the slash command or directly invoke the event path.
--- Since we can't call locals, we'll build the v5 message manually.
+-- Build the message through the real codec, exactly as BroadcastSync would for
+-- a FALL click at "now", then feed it through the receive path.
 local cycleTime = 25.0 -- aldor cycle
 -- Sender clicked FALL (phase 0) at this instant, so the cycle started now.
 -- srvPhase = absoluteTime % cycleTime at the click moment
 local srvPhase = GetServerTime() % cycleTime
 
-local syncMsg = string.format("S|5|aldor|%.3f|SenderPlayer|TestRealm|6.500|4.700|7.800|6.000|C|%.3f",
-    srvPhase, srvPhase) -- phase and srvPhase are the same when sent at the click moment
+-- phase and srvPhase are the same when sent at the click moment
+local syncMsg = Wire.EncodeSync("aldor", srvPhase, "SenderPlayer", "TestRealm",
+    6.5, 4.7, 7.8, 6.0, "C", srvPhase)
 
 MockAPI.ReceiveAddonMessage("ALDORTAX", syncMsg, "CHANNEL", "SenderPlayer")
 
@@ -74,8 +75,8 @@ MockAPI.SetLatency(50, 200)
 local sendTime = GetServerTime()
 local sendSrvPhase = sendTime % cycleTime
 
-local delayedMsg = string.format("S|5|aldor|%.3f|DelayedSender|TestRealm|6.500|4.700|7.800|6.000|C|%.3f",
-    sendSrvPhase, sendSrvPhase)
+local delayedMsg = Wire.EncodeSync("aldor", sendSrvPhase, "DelayedSender", "TestRealm",
+    6.5, 4.7, 7.8, 6.0, "C", sendSrvPhase)
 
 -- Advance time by 200ms to simulate network transit
 MockAPI.AdvanceTime(0)      -- server time only ticks in integers
@@ -141,8 +142,8 @@ MockAPI.SetLatency(0, 0)
 -- We can't do sub-second server time advances easily, so construct srvPhase directly
 local wrapSrvPhase = 24.900
 
-local wrapMsg = string.format("S|5|aldor|%.3f|WrapSender|TestRealm|6.500|4.700|7.800|6.000|C|%.3f",
-    wrapSrvPhase, wrapSrvPhase)
+local wrapMsg = Wire.EncodeSync("aldor", wrapSrvPhase, "WrapSender", "TestRealm",
+    6.5, 4.7, 7.8, 6.0, "C", wrapSrvPhase)
 
 -- Receive it at a time where nowAbs % 25 ≈ 0.1 (just past the boundary)
 -- We need GetAbsoluteTime() % 25 ≈ 0.1
@@ -184,13 +185,13 @@ MockAPI.SetLatency(0, 0)
 
 -- First, accept a sync from "BadPlayer"
 local badPhase = GetServerTime() % cycleTime
-local goodMsg = string.format("S|5|aldor|%.3f|BadPlayer|TestRealm|6.500|4.700|7.800|6.000|C|%.3f",
-    badPhase, badPhase)
+local goodMsg = Wire.EncodeSync("aldor", badPhase, "BadPlayer", "TestRealm",
+    6.5, 4.7, 7.8, 6.0, "C", badPhase)
 MockAPI.ReceiveAddonMessage("ALDORTAX", goodMsg, "CHANNEL", "BadPlayer")
 
 -- Send 3 death reports (SOFT_BLOCK_THRESHOLD = 3)
 for _ = 1, 3 do
-    local deathMsg = string.format("D|5|aldor|%.3f|BadPlayer|TestRealm|C", badPhase)
+    local deathMsg = Wire.EncodeDeath("aldor", badPhase, "BadPlayer", "TestRealm", "C")
     MockAPI.ReceiveAddonMessage("ALDORTAX", deathMsg, "CHANNEL", "BadPlayer")
 end
 
@@ -198,8 +199,8 @@ end
 local postDeathRT = AldorTaxDB.lifts.aldor.lastSyncRealTime
 
 -- Now try another sync from BadPlayer — should be ignored (soft-blocked)
-local badMsg2 = string.format("S|5|aldor|%.3f|BadPlayer|TestRealm|6.500|4.700|7.800|6.000|C|%.3f",
-    badPhase + 5.0, badPhase + 5.0)
+local badMsg2 = Wire.EncodeSync("aldor", badPhase + 5.0, "BadPlayer", "TestRealm",
+    6.5, 4.7, 7.8, 6.0, "C", badPhase + 5.0)
 MockAPI.ReceiveAddonMessage("ALDORTAX", badMsg2, "CHANNEL", "BadPlayer")
 
 -- The sync should NOT have updated — lastSyncRealTime should be unchanged
@@ -232,8 +233,8 @@ local serverTimeOff = GetServerTime() - GetTime()
 local clickAbsRT = clickRealTime - realTimeOff + serverTimeOff
 local clickSrvPhase = clickAbsRT % cycleTime
 
-local clickMsg = string.format("S|5|aldor|%.3f|ClickSender|TestRealm|6.500|4.700|7.800|6.000|C|%.3f",
-    clickSrvPhase, clickSrvPhase)
+local clickMsg = Wire.EncodeSync("aldor", clickSrvPhase, "ClickSender", "TestRealm",
+    6.5, 4.7, 7.8, 6.0, "C", clickSrvPhase)
 
 MockAPI.ReceiveAddonMessage("ALDORTAX", clickMsg, "CHANNEL", "ClickSender")
 
@@ -262,7 +263,9 @@ MockAPI.SetLatency(0, 0)
 -- Using the stored sender name avoids false-negatives when two consecutive
 -- messages compute identical lastSyncRealTime (same phase + clock).
 
--- v3 message — implicit aldor, no liftID, no origin, no srvPhase.
+-- v3 message — implicit aldor, no liftID, no origin, no srvPhase. Hand-built:
+-- Wire.EncodeSync only emits the current version, so legacy formats are
+-- constructed directly to exercise the parser's backward-compat path.
 local v3Phase = GetServerTime() % cycleTime
 local v3Msg = string.format("S|3|%.3f|V3Sender|TestRealm|6.500|4.700|7.800|6.000", v3Phase)
 
@@ -271,18 +274,19 @@ assert_true(AldorTaxDB.lifts.aldor.lastSyncSource
     and AldorTaxDB.lifts.aldor.lastSyncSource.name == "V3Sender",
     "v3 sync accepted")
 
--- v6 message — same wire format as v5, just a client identifier bump.
+-- v6 message — the current version emitted by the codec.
 local v6Phase = GetServerTime() % cycleTime
-local v6Msg = string.format("S|6|aldor|%.3f|V6Sender|TestRealm|6.500|4.700|7.800|6.000|C|%.3f",
-    v6Phase, v6Phase)
+local v6Msg = Wire.EncodeSync("aldor", v6Phase, "V6Sender", "TestRealm",
+    6.5, 4.7, 7.8, 6.0, "C", v6Phase)
 
 MockAPI.ReceiveAddonMessage("ALDORTAX", v6Msg, "CHANNEL", "V6Sender")
 assert_true(AldorTaxDB.lifts.aldor.lastSyncSource
     and AldorTaxDB.lifts.aldor.lastSyncSource.name == "V6Sender",
     "v6 sync accepted")
 
--- v7 message — must be rejected by the receive guard. After this call
--- lastSyncSource.name should still be "V6Sender" from the previous accept.
+-- v7 message — must be rejected by the receive guard. Hand-built (above the
+-- codec's version). After this call lastSyncSource.name should still be
+-- "V6Sender" from the previous accept.
 local v7Phase = GetServerTime() % cycleTime
 local v7Msg = string.format("S|7|aldor|%.3f|V7Sender|TestRealm|6.500|4.700|7.800|6.000|C|%.3f",
     v7Phase, v7Phase)

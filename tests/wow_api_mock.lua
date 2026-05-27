@@ -38,6 +38,13 @@ function MockAPI.TickServerTime()
     _gameTime   = _gameTime + 0.016  -- one frame
 end
 
+-- ─── WoW table utilities ─────────────────────────────────────────────────────
+
+function wipe(t)
+    for k in pairs(t) do t[k] = nil end
+    return t
+end
+
 -- ─── Frame system ───────────────────────────────────────────────────────────
 
 local _allFrames    = {}   -- every frame created, in order

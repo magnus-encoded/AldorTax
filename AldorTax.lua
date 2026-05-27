@@ -1,3 +1,9 @@
+-- Shared addon namespace (WoW passes (addonName, NS) as varargs to each TOC
+-- file). Wire.lua and SyncBus.lua load first and populate these.
+local _, NS = ...
+local Wire    = NS.Wire
+local SyncBus = NS.SyncBus
+
 -- ─── Top-of-screen blink warning ─────────────────────────────────────────────
 
 local warnFrame = CreateFrame("Frame", "AldorTaxWarnFrame", UIParent)
@@ -167,6 +173,7 @@ local LIFTS = {
             ["Coilfang: Serpentshrine Cavern"] = true,
             ["Serpentshrine Cavern"] = true
         },
+        hideAfterEntry = 70, -- auto-hide and suppress after 70s inside SSC (you're in the raid, not at the elevator)
         nearSubzones = { ["Serpentshrine Cavern"] = true },
         deathZones   = {
             ["Coilfang: Serpentshrine Cavern"] = true,
@@ -427,13 +434,8 @@ end
 local APPROACH_WARNING_TIME = 10.0
 local CLICK_REACTION_TIME   = 0.2
 
-local ADDON_PREFIX          = "ALDORTAX"
-local MSG_VERSION           = 6
--- versions the receive guard accepts. Send side stays at MSG_VERSION; this set
--- only governs what we'll parse. v3..v6 all share the same parse path.
-local KNOWN_MSG_VERSIONS    = { [3] = true, [4] = true, [5] = true, [6] = true }
-local SOFT_BLOCK_THRESHOLD  = 3
-local HARD_BLOCK_THRESHOLD  = 6
+-- Wire format (MSG_VERSION / KNOWN_MSG_VERSIONS) and the sync transport
+-- (ADDON_PREFIX, trust thresholds) now live in Wire.lua and SyncBus.lua.
 
 -- ─── Per-lift state ──────────────────────────────────────────────────────────
 
@@ -460,11 +462,10 @@ local activeLiftID             = nil -- which lift the player is currently near
 local realTimeOffset           = nil
 local serverTimeOffset         = nil -- GetServerTime() - GetTime(), calibrated once at login
 local AUTO_BROADCAST_INTERVAL  = 45
-local ZONE_SEND_COOLDOWN       = 5   -- seconds after zoning before we send addon messages
-local zonedInAt                = 0   -- GetTime() when we last zoned into a lift area
 local lastProximityCheck       = 0
 local PROXIMITY_CHECK_INTERVAL = 1.0
-local sscSuppressed            = false -- true = don't show SSC UI this visit (ghost-mode only)
+local sscSuppressed            = false -- true = don't show SSC UI this visit
+local sscEnteredAt             = nil   -- GetTime() when we entered SSC alive; nil when not in SSC
 -- Lifts the user has X-closed via the bar's close button. Cleared on
 -- ZONE_CHANGED_NEW_AREA so leaving and returning to the lift zone re-shows.
 local sessionDismissed         = {}
@@ -489,6 +490,8 @@ local settings                 = {
     enableTram       = false,
     fallSaveAlert    = false,
 }
+-- SyncBus reads settings.debugChannel when fanning out messages.
+NS.settings = settings
 
 local BuildOptionsPanel -- forward declaration
 
@@ -510,6 +513,8 @@ local function Log(msg)
         logEB:SetCursorPosition(0)
     end
 end
+-- Wire/SyncBus route their diagnostics through the addon's copyable log.
+NS.Log = Log
 
 -- ─── Real-time calibration ──────────────────────────────────────────────────
 -- Calibrate by waiting for GetServerTime() to tick.  At the tick boundary the
@@ -790,117 +795,13 @@ local function RestoreSync()
     end
 end
 
--- ─── Trust / blocklist ──────────────────────────────────────────────────────
-
-local function BlockKey(name, realm) return name .. "-" .. realm end
-
-local function GetDeathCount(name, realm)
-    if not AldorTaxDB or not AldorTaxDB.blocklist then return 0 end
-    return AldorTaxDB.blocklist[BlockKey(name, realm)] or 0
-end
-
-local function IsSoftBlocked(name, realm) return GetDeathCount(name, realm) >= SOFT_BLOCK_THRESHOLD end
-local function IsHardBlocked(name, realm) return GetDeathCount(name, realm) >= HARD_BLOCK_THRESHOLD end
-
-local function RecordDeathReport(name, realm)
-    if not AldorTaxDB then return end
-    if not AldorTaxDB.blocklist then AldorTaxDB.blocklist = {} end
-    local key                 = BlockKey(name, realm)
-    local count               = (AldorTaxDB.blocklist[key] or 0) + 1
-    AldorTaxDB.blocklist[key] = count
-    if count == SOFT_BLOCK_THRESHOLD then
-        print(string.format("|cffff6600AldorTax: %s has %d death reports — syncs ignored.|r", key, count))
-    elseif count == HARD_BLOCK_THRESHOLD then
-        print(string.format("|cffff0000AldorTax: %s hard-blocked (%d deaths).|r", key, count))
-    end
-    return count
-end
-
--- ─── Addon messaging ────────────────────────────────────────────────────────
-
-local prefixRegistered = false
-
-local function RegisterPrefix()
-    local ok
-    if C_ChatInfo then
-        ok = C_ChatInfo.RegisterAddonMessagePrefix(ADDON_PREFIX)
-    elseif RegisterAddonMessagePrefix then
-        ok = RegisterAddonMessagePrefix(ADDON_PREFIX)
-    end
-    prefixRegistered = ok and ok ~= false and ok ~= 0
-    if prefixRegistered then
-        Log("|cff00ff00AldorTax: prefix registered OK (ok=" .. tostring(ok) .. ").|r")
-    else
-        Log("|cffffff00AldorTax: prefix registration returned " ..
-            tostring(ok) .. " — will attempt messaging regardless.|r")
-        prefixRegistered = true
-    end
-end
-
--- Returns the channel number for General (localized), or nil if unavailable.
--- On Classic TBC+ General is zone-scoped, so addon messages sent here
--- only reach players in the same zone — ideal for lift sync.
-local function GetGeneralChannelNum()
-    if EnumerateServerChannels then
-        local general = EnumerateServerChannels() -- first return is General
-        if general then
-            local num = GetChannelName(general)
-            if num and num > 0 then return num end
-        end
-    end
-    return nil
-end
-
-local function RawSend(msg, chatType, target)
-    local ok, err
-    if ChatThrottleLib then
-        -- Use CTL: time-sensitive sync data goes as ALERT priority
-        ok, err = pcall(ChatThrottleLib.SendAddonMessage, ChatThrottleLib,
-            "ALERT", ADDON_PREFIX, msg, chatType, target)
-    elseif C_ChatInfo then
-        ok, err = pcall(C_ChatInfo.SendAddonMessage, ADDON_PREFIX, msg, chatType, target)
-    else
-        ok, err = pcall(SendAddonMessage, ADDON_PREFIX, msg, chatType, target)
-    end
-    if not ok then
-        Log(string.format("|cffff0000AldorTax: send failed (%s, %s): %s|r", chatType, tostring(target), tostring(err)))
-    end
-    return ok
-end
-
-local lastNoChannelWarn = 0
-
-local function SendMsg(msg)
-    local sent = false
-    -- General channel (zone-scoped on Classic TBC+)
-    local generalNum = GetGeneralChannelNum()
-    if generalNum then
-        if RawSend(msg, "CHANNEL", generalNum) then sent = true end
-    end
-    -- Guild
-    if IsInGuild() then
-        if RawSend(msg, "GUILD") then sent = true end
-    end
-    -- Party / Raid
-    if UnitInRaid("player") then
-        if RawSend(msg, "RAID") then sent = true end
-    elseif GetNumGroupMembers and GetNumGroupMembers() > 0 then
-        if RawSend(msg, "PARTY") then sent = true end
-    end
-    if settings.debugChannel then
-        Log("|cff88aaff[SYNC OUT] " .. msg:gsub("|", "||") .. "|r")
-    end
-    if not sent then
-        local now = GetTime()
-        if now - lastNoChannelWarn > 60 then
-            lastNoChannelWarn = now
-            Log("|cffffff00AldorTax: no channel to send on (solo)|r")
-        end
-    end
-end
+-- ─── Sync broadcasting ───────────────────────────────────────────────────────
+-- Trust/blocklist, channel selection, and inbound dispatch live in SyncBus.lua;
+-- the wire format lives in Wire.lua. What stays here is the cycle-time math that
+-- turns local sync state into the field values those modules carry.
 
 local function BroadcastSync(liftID, realTime)
-    if GetTime() - zonedInAt < ZONE_SEND_COOLDOWN then return end
+    if not SyncBus.CanSend() then return end
     local def = LIFTS[liftID]
     if not def then return end
     local st       = liftState[liftID]
@@ -918,10 +819,8 @@ local function BroadcastSync(liftID, realTime)
     -- so relays/auto-rebroadcasts carry the original cycle-start, not "now".
     local absRT    = (rt - (realTimeOffset or 0)) + (serverTimeOffset or 0)
     local srvPhase = absRT % def.cycleTime
-    -- v5: S|ver|liftID|phase|name|realm|fall|bottom|rise|top|origin|srvPhase
-    -- phase (field 3) kept for v3/v4 compat; v5 receivers prefer srvPhase (field 11)
-    SendMsg(string.format("S|%d|%s|%.3f|%s|%s|%.3f|%.3f|%.3f|%.3f|%s|%.3f",
-        MSG_VERSION, liftID, phase, name, realm,
+    -- phase (field 3) is kept for v3/v4 compat; v5+ receivers prefer srvPhase.
+    SyncBus.Send(Wire.EncodeSync(liftID, phase, name, realm,
         def.fallTime, def.waitAtBottom, def.riseTime, def.waitAtTop, origin, srvPhase))
 end
 
@@ -933,10 +832,9 @@ local function BroadcastDied(liftID)
     if not st.lastSyncSource then return end
     local def = LIFTS[liftID]
     local phase = dbLift.lastSyncRealTime % def.cycleTime
-    -- v5: D|ver|liftID|phase|name|realm|origin
+    -- Death broadcasts bypass the zone send cooldown — they're safety-critical.
     local origin = st.syncOrigin or "C"
-    SendMsg(string.format("D|%d|%s|%.3f|%s|%s|%s",
-        MSG_VERSION, liftID, phase, st.lastSyncSource.name, st.lastSyncSource.realm, origin))
+    SyncBus.Send(Wire.EncodeDeath(liftID, phase, st.lastSyncSource.name, st.lastSyncSource.realm, origin))
 end
 
 local function ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, top, srvPhase)
@@ -972,113 +870,44 @@ local function ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, t
     end
 end
 
-local function HandleAddonMessage(prefix, message, chatType, sender)
-    if prefix ~= ADDON_PREFIX then return end
-    local msgType = message:sub(1, 1)
+-- Domain side of SyncBus dispatch. SyncBus has already decoded the frame,
+-- dropped self-echoes, verified the transport is known, and applied trust
+-- gating; these handlers do the cycle-state mutation and logging.
 
-    local myName = UnitName("player")
-    local isSelf = sender and (sender == myName or sender:match("^" .. myName .. "%-"))
-
-    if msgType == "T" then
-        Log(string.format("|cffffff00AldorTax RECV [%s] from %s: %s|r", chatType, tostring(sender),
-            tostring(message):gsub("|", "||")))
-        Log("|cff00ff00AldorTax: TEST MESSAGE RECEIVED OK — addon messaging is working.|r")
-        return
+local function OnRemoteSync(p)
+    ApplyRemoteSync(p.transportID, p.phase, p.name, p.realm, p.fall, p.bottom, p.rise, p.top, p.srvPhase)
+    local st = liftState[p.transportID]
+    if st then st.syncOrigin = p.origin end
+    local originLabel = p.origin == "R" and " (relayed)" or ""
+    if p.fall then
+        Log(string.format("|cff00ff00AldorTax: %s sync from %s%s (%.2f+%.2f+%.2f+%.2f=%.2fs)|r",
+            LIFTS[p.transportID].displayName, p.name, originLabel,
+            p.fall, p.bottom, p.rise, p.top, p.fall + p.bottom + p.rise + p.top))
+    else
+        Log(string.format("|cff00ff00AldorTax: %s sync from %s-%s%s|r",
+            LIFTS[p.transportID].displayName, p.name, p.realm, originLabel))
     end
+end
 
-    if isSelf then return end -- always ignore own echoes (guild/General reflect back)
-
-    Log(string.format("|cffffff00AldorTax RECV [%s] from %s: %s|r", chatType, tostring(sender),
-        tostring(message):gsub("|", "||")))
-    local parts = {}
-    for p in message:sub(3):gmatch("[^|]+") do parts[#parts + 1] = p end
-
-    local ver = tonumber(parts[1])
-    -- accept v3, v4, v5, v6 — all share the same parse path; bump this when
-    -- a wire-format break (not just a client identifier bump) is introduced
-    if not ver or not KNOWN_MSG_VERSIONS[ver] then
-        Log("|cffffff00AldorTax: ignoring message with unknown version " .. tostring(parts[1]) .. "|r")
-        return
-    end
-
-    -- v6: same wire format as v5; bumped to identify clients with the fixed
-    --     BroadcastSync srvPhase math (relays/auto-rebroadcasts no longer
-    --     emit "now mod cycle" instead of cycle-start mod cycle).
-    -- v5: S|ver|liftID|phase|name|realm|fall|bottom|rise|top|origin|srvPhase
-    -- v4: S|ver|liftID|phase|name|realm|fall|bottom|rise|top
-    -- v3: S|ver|phase|name|realm|fall|bottom|rise|top  (assumed aldor)
-    if msgType == "S" then
-        local liftID, phase, name, realm, fall, bottom, rise, top, origin, srvPhase
-        if ver >= 4 and #parts >= 5 then
-            liftID   = parts[2]
-            phase    = tonumber(parts[3])
-            name     = parts[4]
-            realm    = parts[5]
-            fall     = tonumber(parts[6])
-            bottom   = tonumber(parts[7])
-            rise     = tonumber(parts[8])
-            top      = tonumber(parts[9])
-            origin   = parts[10] or "C"    -- v4 has no origin field; assume calibrated
-            srvPhase = tonumber(parts[11]) -- v5+; nil for v4
-        elseif ver >= 3 and #parts >= 4 then
-            liftID = "aldor"
-            phase  = tonumber(parts[2])
-            name   = parts[3]
-            realm  = parts[4]
-            fall   = tonumber(parts[5])
-            bottom = tonumber(parts[6])
-            rise   = tonumber(parts[7])
-            top    = tonumber(parts[8])
-            origin = "C"
-        else
-            return
-        end
-        if not phase or not LIFTS[liftID] then return end
-        if IsHardBlocked(name, realm) then return end
-        if IsSoftBlocked(name, realm) then
-            Log(string.format("|cffff6600AldorTax: Ignored sync from soft-blocked %s-%s|r", name, realm))
-            return
-        end
-        ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, top, srvPhase)
-        local st = liftState[liftID]
-        if st then st.syncOrigin = origin end
-        local originLabel = origin == "R" and " (relayed)" or ""
-        if fall then
-            Log(string.format("|cff00ff00AldorTax: %s sync from %s%s (%.2f+%.2f+%.2f+%.2f=%.2fs)|r",
-                LIFTS[liftID].displayName, name, originLabel, fall, bottom, rise, top, fall + bottom + rise + top))
-        else
-            Log(string.format("|cff00ff00AldorTax: %s sync from %s-%s%s|r", LIFTS[liftID].displayName, name, realm,
-                originLabel))
-        end
-    elseif msgType == "D" then
-        local liftID, syncTime, name, realm
-        if ver >= 4 and #parts >= 5 then
-            liftID   = parts[2]
-            syncTime = tonumber(parts[3])
-            name     = parts[4]
-            realm    = parts[5]
-        elseif ver >= 3 and #parts >= 4 then
-            liftID   = "aldor"
-            syncTime = tonumber(parts[2])
-            name     = parts[3]
-            realm    = parts[4]
-        else
-            return
-        end
-        if not syncTime or not name or not LIFTS[liftID] then return end
-        local count = RecordDeathReport(name, realm)
-        local st = liftState[liftID]
-        if st.lastSyncSource and st.lastSyncSource.name == name and st.lastSyncSource.realm == realm then
-            if count and count >= SOFT_BLOCK_THRESHOLD then
-                st.lastSync       = 0
-                st.lastSync2      = 0
-                st.lastSyncSource = nil
-                warnFrame:Hide()
-                print("|cffff0000AldorTax: Active sync invalidated — too many deaths reported.|r")
-            end
+local function OnRemoteDeath(p, count)
+    local st = liftState[p.transportID]
+    if st and st.lastSyncSource
+        and st.lastSyncSource.name == p.name and st.lastSyncSource.realm == p.realm then
+        if count and count >= SyncBus.SOFT_BLOCK_THRESHOLD then
+            st.lastSync       = 0
+            st.lastSync2      = 0
+            st.lastSyncSource = nil
+            warnFrame:Hide()
+            print("|cffff0000AldorTax: Active sync invalidated — too many deaths reported.|r")
         end
     end
 end
+
+SyncBus.Init({
+    onSync           = OnRemoteSync,
+    onDeath          = OnRemoteDeath,
+    isKnownTransport = function(id) return LIFTS[id] ~= nil end,
+})
 
 -- ─── Forward declarations (used by event handlers below, defined later) ─────
 local syncUI = nil
@@ -1178,11 +1007,11 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 if settings[k] ~= nil then settings[k] = v end
             end
         end
-        RegisterPrefix()
+        SyncBus.RegisterPrefix()
         RestoreSync()
         BuildOptionsPanel()
     elseif event == "CHAT_MSG_ADDON" then
-        HandleAddonMessage(arg1, arg2, arg3, arg4)
+        SyncBus.Receive(arg1, arg2, arg3, arg4)
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local _, subEvent = CombatLogGetCurrentEventInfo()
         if subEvent == "ENVIRONMENTAL_DAMAGE" then
@@ -1241,16 +1070,20 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if newLiftID then
             if newLiftID ~= activeLiftID then
                 if not activeLiftID then
-                    zonedInAt = GetTime() -- entering a lift zone; delay sends for server rate-limiter
+                    -- entering a lift zone; delay sends for the server rate-limiter
+                    SyncBus.NotifyZonedIn()
                 end
                 local prevLiftID = activeLiftID
                 activeLiftID = newLiftID
                 -- SSC: suppress UI when entering as a ghost. The user dismisses
                 -- the bar manually via the X button now; no timed auto-hide.
                 if newLiftID == "ssc" and prevLiftID ~= "ssc" then
-                    sscSuppressed = UnitIsGhost("player") and true or false
+                    local isGhost = UnitIsGhost("player") and true or false
+                    sscSuppressed = isGhost
+                    sscEnteredAt  = isGhost and nil or GetTime()
                 elseif prevLiftID == "ssc" then
                     sscSuppressed = false
+                    sscEnteredAt  = nil
                 end
             end
             local def        = LIFTS[activeLiftID]
@@ -1261,6 +1094,7 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         else
             if activeLiftID == "ssc" then
                 sscSuppressed = false
+                sscEnteredAt  = nil
             end
             if syncUI then syncUI:Hide() end
             warnFrame:Hide()
@@ -1324,6 +1158,13 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
     end
     local def = LIFTS[activeLiftID]
     local st  = liftState[activeLiftID]
+    -- hideAfterEntry: auto-hide and suppress the UI after a fixed delay inside SSC.
+    -- Once the player has been in the raid 70s they're past the elevator lobby.
+    if sscEnteredAt and def.hideAfterEntry and (now - sscEnteredAt) >= def.hideAfterEntry then
+        sscSuppressed = true
+        sscEnteredAt  = nil
+        if syncUI then syncUI:Hide() end
+    end
     if doProximity then
         st.isNearLift    = CheckNearLift(def)
         st.isApproaching = CheckApproachLift(def)
@@ -1363,7 +1204,7 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
     end
 
     -- Auto-broadcast
-    local hasRecipient = GetGeneralChannelNum()
+    local hasRecipient = SyncBus.GetGeneralChannelNum()
         or IsInGuild()
         or UnitInRaid("player")
         or (GetNumGroupMembers and GetNumGroupMembers() > 0)

@@ -54,6 +54,18 @@ function H.section(name)
     print(string.format("\n-- %s --", name))
 end
 
+-- Load the addon's Lua files in TOC order, sharing one namespace table —
+-- mirrors how WoW passes (addonName, NS) varargs to each file. Returns NS so
+-- tests can reach NS.Wire, NS.SyncBus, etc. Run from the addon root.
+function H.LoadAddon()
+    local NS = {}
+    local files = { "Wire.lua", "SyncBus.lua", "AldorTax.lua" }
+    for _, file in ipairs(files) do
+        assert(loadfile(file))("AldorTax", NS)
+    end
+    return NS
+end
+
 function H.results()
     print(string.format("\n-- Results: %d passed, %d failed --", passed, failed))
     if #errors > 0 then

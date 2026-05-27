@@ -27,7 +27,7 @@ _G.ChatThrottleLib = {
 MockAPI.SetClock(1775168000, 10000.0, 1775168000)
 MockAPI.SetZone("Shattrath City", "Aldor Rise")
 
-dofile("AldorTax.lua")
+H.LoadAddon()
 MockAPI.InitAddon()
 
 -- Trigger a sync broadcast: set up a sync first, then manually broadcast

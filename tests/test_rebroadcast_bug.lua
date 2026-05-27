@@ -18,7 +18,7 @@ local section, assert_near, assert_true = H.section, H.assert_near, H.assert_tru
 
 MockAPI.SetClock(1775168000, 10000.0, 1775168000)
 MockAPI.SetZone("Shattrath City", "Aldor Rise")
-dofile("AldorTax.lua")
+H.LoadAddon()
 MockAPI.InitAddon()
 
 -- Wire up an outgoing-message capture (the addon prefers ChatThrottleLib if
