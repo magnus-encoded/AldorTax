@@ -59,4 +59,40 @@ function TransportCycle.Phase(def, syncTime, now)
     return (now - syncTime) % def.cycleTime
 end
 
+-- Seconds to the *next* segment boundary, wrapping through the cycle.
+-- At phase=0 the next boundary is segment 2's start (end of FALL).
+-- At phase exactly on a boundary the *following* boundary is returned —
+-- mirrors SegmentIndexAt's tie-breaking (boundary belongs to later seg,
+-- so the boundary "next from here" is the one after that).
+function TransportCycle.SecondsToNextBoundary(def, phase)
+    local starts  = TransportCycle.SegmentStarts(def)
+    local segIdx  = TransportCycle.SegmentIndexAt(def, phase)
+    local nextSeg = (segIdx % 4) + 1
+    return (starts[nextSeg] - phase + def.cycleTime) % def.cycleTime
+end
+
+-- Proportional pixel rects for the four segments, packed into a bar of
+-- `barWidth` pixels. Guarantees: rects[1].x = 0, rects[i+1].x = rects[i].x
+-- + rects[i].w (no gaps, no overlaps), rects[4].x + rects[4].w = barWidth
+-- exactly (any rounding goes into the last segment). Width-proportional
+-- to each segment's duration. Salvaged from the LiftBar.lua draft's
+-- SegmentLayout — same algorithm, reads via TransportCycle instead of
+-- a def.segments array.
+function TransportCycle.SegmentLayout(barWidth, def)
+    local durations = TransportCycle.SegmentDurations(def)
+    local cycle     = def.cycleTime
+    local pixelAt   = { 0 }
+    local cumDur    = 0
+    for i = 1, 4 do
+        cumDur       = cumDur + durations[i]
+        pixelAt[i+1] = (i == 4) and barWidth
+            or math.floor(cumDur * barWidth / cycle + 0.5)
+    end
+    local rects = {}
+    for i = 1, 4 do
+        rects[i] = { x = pixelAt[i], w = pixelAt[i+1] - pixelAt[i] }
+    end
+    return rects
+end
+
 NS.TransportCycle = TransportCycle

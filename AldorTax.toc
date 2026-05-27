@@ -8,4 +8,5 @@
 Wire.lua
 SyncBus.lua
 TransportCycle.lua
+WidgetRouter.lua
 AldorTax.lua

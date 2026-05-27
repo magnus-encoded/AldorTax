@@ -59,7 +59,10 @@ end
 -- tests can reach NS.Wire, NS.SyncBus, etc. Run from the addon root.
 function H.LoadAddon()
     local NS = {}
-    local files = { "Wire.lua", "SyncBus.lua", "TransportCycle.lua", "AldorTax.lua" }
+    local files = {
+        "Wire.lua", "SyncBus.lua", "TransportCycle.lua",
+        "WidgetRouter.lua", "AldorTax.lua",
+    }
     for _, file in ipairs(files) do
         assert(loadfile(file))("AldorTax", NS)
     end
