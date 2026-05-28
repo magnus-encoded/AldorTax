@@ -2,8 +2,18 @@
 -- proximity). Pure 12-cell decision table; no state, no API calls.
 --
 -- Kinds:
---   "lift" — vertical platform (Aldor, Stormspire, Great Lift, TB Lift, SSC)
---   "tram" — horizontal transport (Deeprun Tram)
+--   "lift"     — single vertical platform (Aldor, Stormspire, SSC)
+--   "duallift" — two complementary vertical platforms with a half-cycle
+--                or explicit-dualOffset relationship (Great Lift, TB Lift).
+--                Structurally distinct from "lift" — two cursors, two
+--                segment bars stacked — so it gets its own widget rather
+--                than being a mode of LiftBar.
+--   "tram"    — horizontal transport (Deeprun Tram)
+--
+-- Caller maps from a def to a kind:
+--   def.horizontal              → "tram"
+--   def.dualLift                → "duallift"
+--   otherwise                   → "lift"
 --
 -- Proximities (computed by the caller from subzone + map distance):
 --   "on_platform"  — player is standing on / at the platform
@@ -20,6 +30,11 @@ local WIDGET = {
     lift = {
         on_platform = "LiftBar",
         approaching = "LiftBar",
+        other       = "LightCountdown",
+    },
+    duallift = {
+        on_platform = "DualLiftBar",
+        approaching = "DualLiftBar",
         other       = "LightCountdown",
     },
     tram = {

@@ -99,14 +99,17 @@ end
 
 -- ─── DispatchWidget ───────────────────────────────────────────────────────────
 
-H.section("DispatchWidget — 6-cell decision table")
+H.section("DispatchWidget — 9-cell decision table")
 do
-    H.assert_eq(DispatchWidget("lift", "on_platform"),  "LiftBar",        "lift+on_platform")
-    H.assert_eq(DispatchWidget("lift", "approaching"),  "LiftBar",        "lift+approaching")
-    H.assert_eq(DispatchWidget("lift", "other"),        "LightCountdown", "lift+other")
-    H.assert_eq(DispatchWidget("tram", "on_platform"),  "TramUI",         "tram+on_platform")
-    H.assert_eq(DispatchWidget("tram", "approaching"),  "TramUI",         "tram+approaching")
-    H.assert_eq(DispatchWidget("tram", "other"),        "LightCountdown", "tram+other")
+    H.assert_eq(DispatchWidget("lift",     "on_platform"),  "LiftBar",        "lift+on_platform")
+    H.assert_eq(DispatchWidget("lift",     "approaching"),  "LiftBar",        "lift+approaching")
+    H.assert_eq(DispatchWidget("lift",     "other"),        "LightCountdown", "lift+other")
+    H.assert_eq(DispatchWidget("duallift", "on_platform"),  "DualLiftBar",    "duallift+on_platform")
+    H.assert_eq(DispatchWidget("duallift", "approaching"),  "DualLiftBar",    "duallift+approaching")
+    H.assert_eq(DispatchWidget("duallift", "other"),        "LightCountdown", "duallift+other")
+    H.assert_eq(DispatchWidget("tram",     "on_platform"),  "TramUI",         "tram+on_platform")
+    H.assert_eq(DispatchWidget("tram",     "approaching"),  "TramUI",         "tram+approaching")
+    H.assert_eq(DispatchWidget("tram",     "other"),        "LightCountdown", "tram+other")
 end
 
 H.section("DispatchWidget — fallbacks")
