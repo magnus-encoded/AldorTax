@@ -8,6 +8,7 @@ local suites = {
     "tests/test_rebroadcast_bug.lua",
     "tests/test_transport_cycle.lua",
     "tests/test_widget_math.lua",
+    "tests/test_widget_data_access.lua",
 }
 
 local failed = false

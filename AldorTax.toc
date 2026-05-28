@@ -10,3 +10,6 @@ SyncBus.lua
 TransportCycle.lua
 WidgetRouter.lua
 AldorTax.lua
+LiftBar.lua
+LightCountdown.lua
+TramUI.lua
