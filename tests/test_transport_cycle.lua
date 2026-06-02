@@ -99,4 +99,37 @@ do
     H.assert_eq(TC.SegmentIndexAt(def, 130.3),  4, "tram phase=130.3 → seg 4 (AT IF)")
 end
 
+H.section("LiftHeight — greatlift (30s, fall=rise=10, waits=5)")
+do
+    local def = LIFTS.greatlift
+    -- segments: FALL 0..10, BOTTOM 10..15, RISE 15..25, TOP 25..30
+    H.assert_near(TC.LiftHeight(def, 0.0),  1.0, 0.001, "phase=0 → top (1.0)")
+    H.assert_near(TC.LiftHeight(def, 5.0),  0.5, 0.001, "mid-FALL → halfway down")
+    H.assert_near(TC.LiftHeight(def, 10.0), 0.0, 0.001, "end FALL → bottom (0.0)")
+    H.assert_near(TC.LiftHeight(def, 12.5), 0.0, 0.001, "BOTTOM hold → 0")
+    H.assert_near(TC.LiftHeight(def, 20.0), 0.5, 0.001, "mid-RISE → halfway up")
+    H.assert_near(TC.LiftHeight(def, 25.0), 1.0, 0.001, "end RISE → top")
+    H.assert_near(TC.LiftHeight(def, 28.0), 1.0, 0.001, "TOP hold → 1")
+end
+
+H.section("SecondaryDef — shared-cycle vs distinct-cycle")
+do
+    -- greatlift has no cycleTime2 → platforms share one cycle, def returned as-is
+    local gl = LIFTS.greatlift
+    H.assert_true(TC.SecondaryDef(gl) == gl, "no cycleTime2 → returns same def")
+
+    -- synthetic distinct-cycle def: overrides applied, *2 fields preferred
+    local synth = {
+        fallTime = 10, waitAtBottom = 5, riseTime = 10, waitAtTop = 5,
+        cycleTime = 30, cycleTime2 = 40, fallTime2 = 12,
+        segColors = gl.segColors,
+    }
+    local sd = TC.SecondaryDef(synth)
+    H.assert_false(sd == synth,                    "distinct cycle → new table")
+    H.assert_near(sd.cycleTime, 40,        0.001,  "cycleTime from cycleTime2")
+    H.assert_near(sd.fallTime,  12,        0.001,  "fallTime from fallTime2 override")
+    H.assert_near(sd.waitAtBottom, 5,      0.001,  "waitAtBottom falls back to primary")
+    H.assert_true(sd.segColors == gl.segColors,    "segColors carried through")
+end
+
 H.results()

@@ -26,6 +26,61 @@ do
     H.assert_true(NS.LiftBar         ~= nil, "NS.LiftBar exists")
     H.assert_true(NS.LightCountdown  ~= nil, "NS.LightCountdown exists")
     H.assert_true(NS.TramUI          ~= nil, "NS.TramUI exists")
+    H.assert_true(NS.DualLiftBar     ~= nil, "NS.DualLiftBar exists")
+end
+
+-- ─── DualLiftBar.SecondaryPhase (exposed for test) ────────────────────────────
+
+H.section("DualLiftBar.SecondaryPhase — greatlift (half-cycle default)")
+do
+    local def = LIFTS.greatlift  -- cycleTime 30, no dualOffset → offset = 15
+    H.assert_near(NS.DualLiftBar.SecondaryPhase(def, 0.0),  15.0, 0.001, "phase 0 → 15")
+    H.assert_near(NS.DualLiftBar.SecondaryPhase(def, 20.0),  5.0, 0.001, "phase 20 → 35 wraps to 5")
+    H.assert_near(NS.DualLiftBar.SecondaryPhase(def, 15.0),  0.0, 0.001, "phase 15 → 30 wraps to 0")
+end
+
+H.section("DualLiftBar.SecondaryPhase — tblift (dualOffset = -3.7)")
+do
+    local def = LIFTS.tblift  -- cycleTime 30, dualOffset -3.7
+    H.assert_near(NS.DualLiftBar.SecondaryPhase(def, 10.0), 6.3, 0.001, "phase 10 - 3.7 → 6.3")
+    H.assert_near(NS.DualLiftBar.SecondaryPhase(def, 0.0),  26.3, 0.001, "phase 0 - 3.7 wraps to 26.3")
+end
+
+-- ─── DualLiftBar.ResolveClick — quartile zones + secondary translation ────────
+
+H.section("DualLiftBar.ResolveClick — greatlift primary quartiles")
+do
+    local def = LIFTS.greatlift  -- starts {0, 10, 15, 25}
+    local l1, p1 = NS.DualLiftBar.ResolveClick(def, true, 0.90)
+    H.assert_eq(l1, "TOP",          "top quarter → TOP")
+    H.assert_near(p1, 25.0, 0.001,  "TOP → starts[4]=25")
+    local l2, p2 = NS.DualLiftBar.ResolveClick(def, true, 0.60)
+    H.assert_eq(l2, "FALL",         "upper-mid → FALL")
+    H.assert_near(p2, 0.0, 0.001,   "FALL → starts[1]=0")
+    local l3, p3 = NS.DualLiftBar.ResolveClick(def, true, 0.30)
+    H.assert_eq(l3, "RISE",         "lower-mid → RISE")
+    H.assert_near(p3, 15.0, 0.001,  "RISE → starts[3]=15")
+    local l4, p4 = NS.DualLiftBar.ResolveClick(def, true, 0.10)
+    H.assert_eq(l4, "BOTTOM",       "bottom quarter → BOTTOM")
+    H.assert_near(p4, 10.0, 0.001,  "BOTTOM → starts[2]=10")
+end
+
+H.section("DualLiftBar.ResolveClick — secondary translates to primary clock")
+do
+    -- greatlift: offset = cycleTime/2 = 15
+    local gl = LIFTS.greatlift
+    local lg, pg = NS.DualLiftBar.ResolveClick(gl, false, 0.90)  -- TOP seg=25
+    H.assert_eq(lg, "TOP (2nd)",    "secondary label tagged")
+    H.assert_near(pg, 10.0, 0.001,  "(25-15)%30 = 10")
+    local _, pg2 = NS.DualLiftBar.ResolveClick(gl, false, 0.10)  -- BOTTOM seg=10
+    H.assert_near(pg2, 25.0, 0.001, "(10-15)%30 = 25")
+
+    -- tblift: offset = dualOffset = -3.7; starts {0, 9.5, 15, 24.5}
+    local tb = LIFTS.tblift
+    local _, pt = NS.DualLiftBar.ResolveClick(tb, false, 0.90)   -- TOP seg=24.5
+    H.assert_near(pt, 28.2, 0.001,  "(24.5-(-3.7))%30 = 28.2")
+    local _, pt2 = NS.DualLiftBar.ResolveClick(tb, false, 0.10)  -- BOTTOM seg=9.5
+    H.assert_near(pt2, 13.2, 0.001, "(9.5+3.7)%30 = 13.2")
 end
 
 -- ─── LightCountdown.FormatCountdown ───────────────────────────────────────────

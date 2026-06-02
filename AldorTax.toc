@@ -13,3 +13,4 @@ AldorTax.lua
 LiftBar.lua
 LightCountdown.lua
 TramUI.lua
+DualLiftBar.lua

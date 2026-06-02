@@ -95,4 +95,39 @@ function TransportCycle.SegmentLayout(barWidth, def)
     return rects
 end
 
+-- Vertical height fraction [0,1] of a lift platform at the given phase:
+-- 0 = at the bottom, 1 = at the top. Mirrors the monolith's GetLiftHeight.
+-- FALL ramps 1→0, BOTTOM holds 0, RISE ramps 0→1, TOP holds 1. Used by the
+-- DualLiftBar widget to place each vertical cursor.
+function TransportCycle.LiftHeight(def, phase)
+    if phase < def.fallTime then
+        return 1.0 - (phase / def.fallTime)
+    elseif phase < def.fallTime + def.waitAtBottom then
+        return 0.0
+    elseif phase < def.fallTime + def.waitAtBottom + def.riseTime then
+        return (phase - def.fallTime - def.waitAtBottom) / def.riseTime
+    else
+        return 1.0
+    end
+end
+
+-- The secondary platform's segment def for a dual lift. Mirrors the
+-- monolith's SecDef: when a def carries a distinct second-platform cycle
+-- (cycleTime2 + optional *2 segment overrides) this returns a flat def for
+-- that platform; otherwise the platforms share one cycle and the original
+-- def is returned unchanged. The returned table is suitable input to the
+-- other TransportCycle functions (carries segColors; falls back to the
+-- primary segment times for any *2 field left unset).
+function TransportCycle.SecondaryDef(def)
+    if not def.cycleTime2 then return def end
+    return {
+        fallTime     = def.fallTime2     or def.fallTime,
+        waitAtBottom = def.waitAtBottom2 or def.waitAtBottom,
+        riseTime     = def.riseTime2     or def.riseTime,
+        waitAtTop    = def.waitAtTop2    or def.waitAtTop,
+        cycleTime    = def.cycleTime2,
+        segColors    = def.segColors,
+    }
+end
+
 NS.TransportCycle = TransportCycle

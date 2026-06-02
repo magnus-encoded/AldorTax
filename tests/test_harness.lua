@@ -63,6 +63,7 @@ function H.LoadAddon()
         "Wire.lua", "SyncBus.lua", "TransportCycle.lua",
         "WidgetRouter.lua", "AldorTax.lua",
         "LiftBar.lua", "LightCountdown.lua", "TramUI.lua",
+        "DualLiftBar.lua",
     }
     for _, file in ipairs(files) do
         assert(loadfile(file))("AldorTax", NS)
