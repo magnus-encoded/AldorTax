@@ -335,9 +335,10 @@ section("Test 14: SSC UI hides after hideAfterEntry timeout")
 MockAPI.SetZone("Coilfang: Serpentshrine Cavern", "Serpentshrine Cavern")
 MockAPI.FireEvent("ZONE_CHANGED_NEW_AREA")
 
--- UI should be shown immediately (syncUI exists and is visible)
-local sscUI = _G.AldorTaxSyncUI
-assert_true(sscUI ~= nil, "syncUI built on SSC entry")
+-- SSC is single-form, so post-cutover (Step 5b) its surface is the new LiftBar
+-- widget, not the legacy syncUI. Assert against AldorTaxLiftBar.
+local sscUI = _G.AldorTaxLiftBar
+assert_true(sscUI ~= nil, "LiftBar built on SSC entry")
 assert_true(sscUI:IsShown(), "SSC UI shown on live entry")
 
 -- Advance past the 70s hide timer
@@ -387,6 +388,10 @@ UnitIsGhost = function(unit) return false end  -- restore
 
 section("Test 16: ReconfigureLift resets bar geometry on lift transition")
 
+-- This exercises the LEGACY syncUI frame's dual-lift geometry self-heal, which
+-- is still the surface for dual lifts (TB/Great Lift) post-cutover. Single lifts
+-- no longer construct syncUI, so force it to build via the /atax ui toggle.
+if not _G.AldorTaxSyncUI then SlashCmdList["ALDORTAX"]("ui") end
 local syncUI = _G.AldorTaxSyncUI
 assert_true(syncUI ~= nil, "syncUI exists for transition test")
 assert_true(type(syncUI.ReconfigureLift) == "function", "ReconfigureLift exposed")

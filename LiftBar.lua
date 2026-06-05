@@ -317,6 +317,7 @@ function LiftBar.ReconfigureTransport(transportID)
 end
 
 function LiftBar.UpdateCursor()
+    if not _getState or not _getActiveID then return end  -- not yet Init'd
     if not barFrame or not barFrame:IsShown() or not currentTransportID then return end
 
     local states = _getState()

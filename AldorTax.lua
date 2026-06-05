@@ -928,21 +928,73 @@ local BuildSyncUI
 -- (isNearLift, isApproaching) and sscSuppressed up to date before calling.
 
 local configuredLiftID = nil
+
+-- Step 5b cutover flag: route single-form lifts (aldor/stormspire/ssc) to the
+-- new LiftBar widget. Dual, tram, dev paths, and the /atax ui toggle stay on
+-- the legacy syncUI surface for now. Flip to false to revert to all-legacy.
+local USE_NEW_LIFTBAR = true
+
+local function activeIsSingle()
+    return USE_NEW_LIFTBAR
+        and activeLiftID ~= nil
+        and NS.TransportForm(LIFTS[activeLiftID]) == "single"
+end
+
+-- liftBarMode mirrors LiftBar's compact state so the adapter's compact() stays
+-- idempotent — parity with legacy syncUI.SetCompact, which no-ops on unchanged
+-- mode and re-lays-out segments only on an actual change. Reset on lift change.
+local liftBarMode = nil
+
+-- Returns a normalized rendering surface for liftID: the new LiftBar widget
+-- when the lift is single-form and the cutover flag is on, else the legacy
+-- syncUI. The visibility state machine below is written once against either.
+local function SurfaceFor(liftID)
+    if USE_NEW_LIFTBAR and NS.TransportForm(LIFTS[liftID]) == "single" then
+        local LB = NS.LiftBar
+        return {
+            reconfigure = function(id) LB.ReconfigureTransport(id) end,
+            show        = function(id) LB.Show(id) end,
+            hide        = function()   LB.Hide() end,
+            compact     = function(c)
+                if c == liftBarMode then return end
+                liftBarMode = c
+                LB.SetMode(c and "compact" or "full")
+                if configuredLiftID then LB.ReconfigureTransport(configuredLiftID) end
+            end,
+        }
+    end
+    if not syncUI then syncUI = BuildSyncUI() end
+    return {
+        reconfigure = function(id) syncUI.ReconfigureLift(id) end,
+        show        = function()   syncUI:Show() end,
+        hide        = function()   syncUI:Hide() end,
+        compact     = function(c)  syncUI.SetCompact(c) end,
+    }
+end
+
 local function UpdateSyncUIVisibility(liftID)
     if not liftID then
         if syncUI then syncUI:Hide() end
+        if NS.LiftBar then NS.LiftBar.Hide() end
         return
     end
-    if not syncUI then syncUI = BuildSyncUI() end
+
+    local surface = SurfaceFor(liftID)
+
     if liftID ~= configuredLiftID then
-        syncUI.ReconfigureLift(liftID)
+        -- Hide whichever surface we're leaving so a single→dual/tram crossing
+        -- can't leave two bars on screen, then lay out the new one.
+        if syncUI then syncUI:Hide() end
+        if NS.LiftBar then NS.LiftBar.Hide() end
+        liftBarMode = nil
+        surface.reconfigure(liftID)
         configuredLiftID = liftID
     end
     local st = liftState[liftID]
 
     -- Hard-hide conditions: user dismissed via X, or SSC ghost-mode suppression.
     if sessionDismissed[liftID] or sscSuppressed then
-        syncUI:Hide()
+        surface.hide()
         return
     end
 
@@ -955,20 +1007,20 @@ local function UpdateSyncUIVisibility(liftID)
     end
 
     if not st.latchShown then
-        syncUI:Hide()
+        surface.hide()
         return
     end
 
     -- Compact vs full mode: alwaysCompact always wins; otherwise pick by
     -- current proximity, defaulting to full when latched-but-elsewhere.
     if settings.alwaysCompact then
-        syncUI:Show(); syncUI.SetCompact(true)
+        surface.show(liftID); surface.compact(true)
     elseif settings.alwaysShowUI or st.isNearLift then
-        syncUI:Show(); syncUI.SetCompact(false)
+        surface.show(liftID); surface.compact(false)
     elseif st.isApproaching then
-        syncUI:Show(); syncUI.SetCompact(true)
+        surface.show(liftID); surface.compact(true)
     else
-        syncUI:Show(); syncUI.SetCompact(false)
+        surface.show(liftID); surface.compact(false)
     end
 end
 
@@ -1105,6 +1157,7 @@ logicFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 sscEnteredAt  = nil
             end
             if syncUI then syncUI:Hide() end
+            if NS.LiftBar then NS.LiftBar.Hide() end
             warnFrame:Hide()
             -- Final broadcast as we leave
             if activeLiftID and liftState[activeLiftID].lastSync > 0 then
@@ -1172,6 +1225,7 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         sscSuppressed = true
         sscEnteredAt  = nil
         if syncUI then syncUI:Hide() end
+        if NS.LiftBar then NS.LiftBar.Hide() end
     end
     if doProximity then
         st.isNearLift    = CheckNearLift(def)
@@ -1192,7 +1246,9 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         local progress          = (GetTime() - st.lastSync) % def.cycleTime
         local timeUntilNextDrop = def.cycleTime - progress
 
-        local uiVisible         = (syncUI and syncUI:IsShown()) or settings.alwaysShowUI
+        local uiVisible         = (syncUI and syncUI:IsShown())
+            or (NS.LiftBar and NS.LiftBar.IsShown())
+            or settings.alwaysShowUI
         local warnSuppressed    = sessionDismissed[activeLiftID] or sscSuppressed
         if uiVisible or warnSuppressed then
             warnFrame:Hide()
@@ -1224,8 +1280,10 @@ logicFrame:SetScript("OnUpdate", function(self, elapsed)
         end
     end
 
-    -- Tick the sync UI cursor
-    if syncUI and syncUI:IsShown() and syncUI.UpdateCursor then
+    -- Tick the sync UI cursor (single-form lifts tick LiftBar; others legacy)
+    if activeIsSingle() then
+        if NS.LiftBar and NS.LiftBar.IsShown() then NS.LiftBar.UpdateCursor() end
+    elseif syncUI and syncUI:IsShown() and syncUI.UpdateCursor then
         syncUI.UpdateCursor()
     end
 end)
@@ -1257,6 +1315,25 @@ local function PerformCalibrationClick(liftID, phaseStart, label)
         date("%Y-%m-%d %H:%M:%S"), liftID, label, GetServerTime(), phaseStart))
     Log(string.format("|cff00ff00AldorTax: %s synced at %s|r", def.displayName, label))
 end
+
+-- ─── Wire the single-form widget (Step 5b cutover) ──────────────────────────
+-- LiftBar renders single-form lifts (aldor/stormspire/ssc) when USE_NEW_LIFTBAR
+-- is on. Init runs at PLAYER_LOGIN — after every module file has loaded so
+-- NS.LiftBar exists — and lives here lexically so PerformCalibrationClick and
+-- DismissActiveLift resolve as upvalues. getState returns the whole liftState
+-- table (LiftBar.UpdateCursor indexes it by id); getActiveID tracks the player.
+local liftBarInitFrame = CreateFrame("Frame")
+liftBarInitFrame:RegisterEvent("PLAYER_LOGIN")
+liftBarInitFrame:SetScript("OnEvent", function()
+    if NS.LiftBar and NS.LiftBar.Init then
+        NS.LiftBar.Init({
+            getState    = function() return liftState end,
+            getActiveID = function() return activeLiftID end,
+            onCalibrate = PerformCalibrationClick,
+            onDismiss   = DismissActiveLift,
+        })
+    end
+end)
 
 -- ─── Sync UI ────────────────────────────────────────────────────────────────
 

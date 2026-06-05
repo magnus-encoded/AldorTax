@@ -324,8 +324,11 @@ function MockAPI.ReceiveAddonMessage(prefix, message, chatType, sender)
     MockAPI.FireEvent("CHAT_MSG_ADDON", prefix, message, chatType, sender)
 end
 
--- Full initialization sequence: calibrate → ADDON_LOADED → zone detect
+-- Full initialization sequence: login → calibrate → ADDON_LOADED → zone detect
+-- PLAYER_LOGIN fires first (as in-game, before the first OnUpdate frame) so any
+-- login-time wiring — e.g. LiftBar.Init — is in place before the cursor ticks.
 function MockAPI.InitAddon()
+    MockAPI.FireEvent("PLAYER_LOGIN")
     MockAPI.RunCalibration()
     MockAPI.FireEvent("ADDON_LOADED", "AldorTax")
     -- Fire a couple OnUpdates for the channel join poller
