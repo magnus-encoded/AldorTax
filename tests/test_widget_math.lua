@@ -22,6 +22,7 @@ MockAPI.InitAddon()
 
 local TC             = NS.TransportCycle
 local DispatchWidget = NS.DispatchWidget
+local TransportForm  = NS.TransportForm
 local LIFTS          = NS.LIFTS
 
 -- ─── SegmentLayout ────────────────────────────────────────────────────────────
@@ -101,25 +102,49 @@ end
 
 H.section("DispatchWidget — 9-cell decision table")
 do
-    H.assert_eq(DispatchWidget("lift",     "on_platform"),  "LiftBar",        "lift+on_platform")
-    H.assert_eq(DispatchWidget("lift",     "approaching"),  "LiftBar",        "lift+approaching")
-    H.assert_eq(DispatchWidget("lift",     "other"),        "LightCountdown", "lift+other")
-    H.assert_eq(DispatchWidget("duallift", "on_platform"),  "DualLiftBar",    "duallift+on_platform")
-    H.assert_eq(DispatchWidget("duallift", "approaching"),  "DualLiftBar",    "duallift+approaching")
-    H.assert_eq(DispatchWidget("duallift", "other"),        "LightCountdown", "duallift+other")
-    H.assert_eq(DispatchWidget("tram",     "on_platform"),  "TramUI",         "tram+on_platform")
-    H.assert_eq(DispatchWidget("tram",     "approaching"),  "TramUI",         "tram+approaching")
-    H.assert_eq(DispatchWidget("tram",     "other"),        "LightCountdown", "tram+other")
+    H.assert_eq(DispatchWidget("single",     "on_platform"),  "LiftBar",        "single+on_platform")
+    H.assert_eq(DispatchWidget("single",     "approaching"),  "LiftBar",        "single+approaching")
+    H.assert_eq(DispatchWidget("single",     "other"),        "LightCountdown", "single+other")
+    H.assert_eq(DispatchWidget("dual",       "on_platform"),  "DualLiftBar",    "dual+on_platform")
+    H.assert_eq(DispatchWidget("dual",       "approaching"),  "DualLiftBar",    "dual+approaching")
+    H.assert_eq(DispatchWidget("dual",       "other"),        "LightCountdown", "dual+other")
+    H.assert_eq(DispatchWidget("horizontal", "on_platform"),  "TramUI",         "horizontal+on_platform")
+    H.assert_eq(DispatchWidget("horizontal", "approaching"),  "TramUI",         "horizontal+approaching")
+    H.assert_eq(DispatchWidget("horizontal", "other"),        "LightCountdown", "horizontal+other")
 end
 
 H.section("DispatchWidget — fallbacks")
 do
-    H.assert_eq(DispatchWidget("lift", nil),         "LightCountdown", "nil proximity → LightCountdown")
-    H.assert_eq(DispatchWidget("lift", "unknown"),   "LightCountdown", "unknown proximity → LightCountdown")
-    H.assert_eq(DispatchWidget(nil, "on_platform"),  "LiftBar",        "nil kind defaults to lift")
-    H.assert_eq(DispatchWidget(nil, "other"),        "LightCountdown", "nil kind + other")
+    H.assert_eq(DispatchWidget("single", nil),       "LightCountdown", "nil proximity → LightCountdown")
+    H.assert_eq(DispatchWidget("single", "unknown"), "LightCountdown", "unknown proximity → LightCountdown")
+    H.assert_eq(DispatchWidget(nil, "on_platform"),  "LiftBar",        "nil form defaults to single")
+    H.assert_eq(DispatchWidget(nil, "other"),        "LightCountdown", "nil form + other")
     H.assert_eq(DispatchWidget("zeppelin", "other"), "LightCountdown",
-        "unknown kind defaults to lift, then 'other' → LightCountdown")
+        "unknown form defaults to single, then 'other' → LightCountdown")
+end
+
+-- ─── TransportForm (def → form) ───────────────────────────────────────────────
+
+H.section("TransportForm — single platform")
+do
+    H.assert_eq(TransportForm(LIFTS.aldor), "single", "aldor (no flags) → single")
+end
+
+H.section("TransportForm — dual platform")
+do
+    H.assert_eq(TransportForm(LIFTS.greatlift), "dual", "greatlift (dualLift) → dual")
+end
+
+H.section("TransportForm — horizontal wins over dualLift")
+do
+    -- Deeprun Tram carries BOTH horizontal and dualLift; horizontal must win.
+    H.assert_eq(TransportForm(LIFTS.deepruntram), "horizontal", "deepruntram (horizontal+dualLift) → horizontal")
+end
+
+H.section("TransportForm — nil def degrades safely")
+do
+    -- OnUpdate may call this with no active def; must not throw.
+    H.assert_eq(TransportForm(nil), "single", "nil def → single (composes with DispatchWidget nil default)")
 end
 
 H.results()
