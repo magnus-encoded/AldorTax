@@ -439,6 +439,96 @@ assert_eq(syncUI.barBg:GetWidth(), 460 + 4,
     "barBg width restored to full (464) after dual-lift detour — guards the actual bug")
 
 
+-- ─── Test 17: Received sync logged to syncLog with source ──────────────────
+-- Remote syncs must leave a durable trace: a RECV row carrying the sender
+-- and the correction delta vs the local model. (Before this, receives were
+-- invisible — only the latest lastSyncSource survived, until the next local
+-- click erased it.)
+
+section("Test 17: Received sync logged to syncLog with source")
+
+local logLenBefore = AldorTaxDB.syncLog and #AldorTaxDB.syncLog or 0
+local recvCycle = 43.333
+local recvPhase = GetServerTime() % recvCycle
+local recvMsg = string.format("S|5|ssc|%.3f|Recvtester|TestRealm|16.500|5.000|13.333|8.500|C|%.3f",
+    recvPhase, recvPhase)
+MockAPI.ReceiveAddonMessage("ALDORTAX", recvMsg, "CHANNEL", "Recvtester")
+
+local log = AldorTaxDB.syncLog
+assert_true(#log > logLenBefore, "syncLog grew on received sync")
+local lastRow = log[#log]
+assert_true(lastRow:find("|ssc|RECV:Recvtester-TestRealm|", 1, true) ~= nil,
+    "RECV row carries lift and source (got: " .. tostring(lastRow) .. ")")
+local recvCorr = lastRow:match("|RECV:[^|]+|[%d%.]+|([%d%.%-]+)|")
+assert_true(tonumber(recvCorr) ~= nil,
+    "RECV row has numeric correction delta (got: " .. tostring(recvCorr) .. ")")
+
+-- The receive must also land a timing sample labeled RECV, so /atax timing
+-- reports received-sync accuracy as its own segment group.
+local sscSamples = AldorTaxDB.timing and AldorTaxDB.timing.ssc
+assert_true(sscSamples ~= nil and sscSamples[#sscSamples][4] == "RECV",
+    "timing sample recorded with RECV label")
+
+
+-- ─── Test 18: Correction report (C frame) round trip ────────────────────────
+-- Outbound: calibrating over a remote-sourced sync must broadcast a C frame
+-- naming the original sender and the correction size. Inbound: receiving a
+-- C frame about our own sync must log an FBCK row and timing sample.
+
+section("Test 18: Correction report emitted and received")
+
+-- Be on Aldor Rise with a remote-sourced sync.
+MockAPI.SetZone("Shattrath City", "Aldor Rise")
+MockAPI.FireEvent("ZONE_CHANGED_NEW_AREA")
+MockAPI.AdvanceTime(6) -- clear the post-zone send cooldown
+local aldorPhase = GetServerTime() % 25.0
+local remoteMsg = string.format("S|5|aldor|%.3f|Sourceguy|TestRealm|6.500|4.700|7.800|6.000|C|%.3f",
+    aldorPhase, aldorPhase)
+MockAPI.ReceiveAddonMessage("ALDORTAX", remoteMsg, "CHANNEL", "Sourceguy")
+
+-- Calibrate over it via a real segment click (segBtns exposed on syncUI).
+local ui = _G.AldorTaxSyncUI
+assert_true(ui ~= nil and ui.segBtns ~= nil, "syncUI segment buttons exposed")
+ctlCalls = {}
+ui.segBtns[1]:GetScript("OnClick")()
+
+local cFrame
+for _, c in ipairs(ctlCalls) do
+    if c.text:sub(1, 2) == "C|" then cFrame = c.text break end
+end
+assert_true(cFrame ~= nil, "calibration over remote sync broadcast a C frame")
+if cFrame then
+    assert_true(cFrame:find("|aldor|", 1, true) ~= nil, "C frame names the transport")
+    assert_true(cFrame:find("|TestPlayer|TestRealm|Sourceguy|TestRealm", 1, true) ~= nil,
+        "C frame carries reporter and original source (got: " .. cFrame .. ")")
+end
+
+-- A plain re-click (model is now first-hand) must NOT emit another C frame.
+ctlCalls = {}
+ui.segBtns[1]:GetScript("OnClick")()
+for _, c in ipairs(ctlCalls) do
+    assert_true(c.text:sub(1, 2) ~= "C|", "no C frame when correcting our own model")
+end
+
+-- Inbound: someone reports a correction against OUR sync.
+local logLen18 = #AldorTaxDB.syncLog
+local inboundC = "C|6|aldor|12.345|1.250|Reporter|TestRealm|TestPlayer|TestRealm"
+MockAPI.ReceiveAddonMessage("ALDORTAX", inboundC, "CHANNEL", "Reporter")
+
+assert_true(#AldorTaxDB.syncLog > logLen18, "syncLog grew on received C frame")
+local fbckRow = AldorTaxDB.syncLog[#AldorTaxDB.syncLog]
+assert_true(fbckRow:find("|aldor|FBCK:Reporter-TestRealm>TestPlayer-TestRealm|", 1, true) ~= nil,
+    "FBCK row carries reporter and source (got: " .. tostring(fbckRow) .. ")")
+assert_true(fbckRow:find("|1.250|12.345", 1, true) ~= nil,
+    "FBCK row carries correction and received offset")
+
+local aldorSamples = AldorTaxDB.timing.aldor
+assert_true(aldorSamples[#aldorSamples][4] == "FBCK",
+    "C frame about our sync recorded an FBCK timing sample")
+assert_true(math.abs(aldorSamples[#aldorSamples][3] - 1.25) < 0.001,
+    "FBCK timing sample carries the reported correction")
+
+
 -- ─── Results ────────────────────────────────────────────────────────────────
 
 H.results()

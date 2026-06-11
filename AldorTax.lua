@@ -679,19 +679,31 @@ local function AnalyzeTiming(liftID)
     local cycle = def.cycleTime
     local twoPi = 2 * math.pi
 
+    -- Epoch/drift stats use first-hand calibration clicks only. Remote syncs
+    -- ("RECV") and correction reports about our broadcasts ("FBCK") may carry
+    -- a systematic sender-side offset that would bias the cycle-error
+    -- estimate; they still get their own rows in segments below.
+    local calib = {}
+    for i = 1, n do
+        local label = samples[i][4]
+        if label ~= "RECV" and label ~= "FBCK" then calib[#calib + 1] = samples[i] end
+    end
+    local cn = #calib
+    if cn < 2 then return nil end
+
     -- Circular mean of epoch offset (handles wrap at cycleTime)
     local sumSin, sumCos = 0, 0
-    for i = 1, n do
-        local angle = samples[i][2] * twoPi / cycle
+    for i = 1, cn do
+        local angle = calib[i][2] * twoPi / cycle
         sumSin = sumSin + math.sin(angle)
         sumCos = sumCos + math.cos(angle)
     end
-    local meanAngle = math.atan2(sumSin / n, sumCos / n)
+    local meanAngle = math.atan2(sumSin / cn, sumCos / cn)
     if meanAngle < 0 then meanAngle = meanAngle + twoPi end
     local meanEpoch = meanAngle * cycle / twoPi
 
     -- Circular standard deviation
-    local R = math.sqrt((sumSin / n) ^ 2 + (sumCos / n) ^ 2)
+    local R = math.sqrt((sumSin / cn) ^ 2 + (sumCos / cn) ^ 2)
     local stdEpoch = (R < 1) and math.sqrt(-2 * math.log(R)) * cycle / twoPi or 0
 
     -- Drift detection: unwrap epoch offsets relative to meanEpoch, then
@@ -699,23 +711,23 @@ local function AnalyzeTiming(liftID)
     -- Unwrap: offset_i = ((raw - meanEpoch + half) % cycle) - half + meanEpoch
     local half = cycle / 2
     local sumT, sumY, sumTY, sumT2 = 0, 0, 0, 0
-    local t0 = samples[1][1] -- reference time for numerical stability
-    for i = 1, n do
-        local t         = samples[i][1] - t0
-        local raw       = samples[i][2]
+    local t0 = calib[1][1] -- reference time for numerical stability
+    for i = 1, cn do
+        local t         = calib[i][1] - t0
+        local raw       = calib[i][2]
         local unwrapped = ((raw - meanEpoch + half) % cycle) - half + meanEpoch
         sumT            = sumT + t
         sumY            = sumY + unwrapped
         sumTY           = sumTY + t * unwrapped
         sumT2           = sumT2 + t * t
     end
-    local denom = n * sumT2 - sumT * sumT
-    local driftPerSec = (denom ~= 0) and (n * sumTY - sumT * sumY) / denom or 0
+    local denom = cn * sumT2 - sumT * sumT
+    local driftPerSec = (denom ~= 0) and (cn * sumTY - sumT * sumY) / denom or 0
     local driftPerHour = driftPerSec * 3600
     -- Drift per cycle = driftPerSec * cycleTime → implied true cycle = cycle + drift_per_cycle
     local impliedCycleError = driftPerSec * cycle
 
-    -- Per-segment correction statistics
+    -- Per-segment correction statistics (includes RECV as its own group)
     local segData = {}
     for i = 1, n do
         local corr = samples[i][3]
@@ -749,10 +761,14 @@ local function AnalyzeTiming(liftID)
     }
 end
 
--- Log how much a local calibration click shifts the predicted phase.
+-- Log how much a new sync shifts the predicted phase.
 -- Called just before st.lastSync is overwritten.
--- label: segment name from the click (e.g. "FALL", "BOTTOM")
-local function LogSyncCorrection(liftID, newSyncTime, label)
+-- label: segment name from the click (e.g. "FALL", "BOTTOM"), or "RECV" for
+--        remote syncs — RECV samples show up as their own group in /atax timing,
+--        so the systematic offset of received data is directly measurable.
+-- rowType: syncLog row tag; defaults to "CORRECTION". Remote syncs pass
+--        "RECV:Name-Realm" so the log preserves who the sync came from.
+local function LogSyncCorrection(liftID, newSyncTime, label, rowType)
     local st  = liftState[liftID]
     local def = LIFTS[liftID]
     if not st or not def or st.lastSync <= 0 then return end
@@ -767,10 +783,12 @@ local function LogSyncCorrection(liftID, newSyncTime, label)
     local absSync = newSyncTime + (serverTimeOffset or 0)
     local epochOffset = absSync % def.cycleTime
     AppendSyncLog(string.format(
-        "%s|%s|CORRECTION|%.3f|%.3f|%.3f",
-        date("%Y-%m-%d %H:%M:%S"), liftID, GetServerTime(), correction, epochOffset))
+        "%s|%s|%s|%.3f|%.3f|%.3f",
+        date("%Y-%m-%d %H:%M:%S"), liftID, rowType or "CORRECTION",
+        GetServerTime(), correction, epochOffset))
     RecordTimingSample(liftID, GetServerTime(), epochOffset, correction, label)
     Log(string.format("AldorTax: sync correction: %+.3fs (server epoch offset: %.3f)", correction, epochOffset))
+    return correction
 end
 
 local function ApplyEpochAnchor(id)
@@ -868,7 +886,20 @@ local function ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, t
         local nowReal = GetRealTime() - netDelay
         elapsedInCycle = (nowReal % cycle_s - phase + cycle_s) % cycle_s
     end
-    st.lastSync       = GetTime() - elapsedInCycle
+    -- Log the receive before it overwrites the local model: the correction
+    -- delta measures how far the remote sync diverges from our prediction.
+    local newSyncTime = GetTime() - elapsedInCycle
+    local rowType = string.format("RECV:%s-%s", name, realm or "")
+    if st.lastSync > 0 then
+        LogSyncCorrection(liftID, newSyncTime, "RECV", rowType)
+    else
+        -- No local model to diff against; log the arrival itself.
+        local absSync = newSyncTime + (serverTimeOffset or 0)
+        AppendSyncLog(string.format("%s|%s|%s|%.3f|n/a|%.3f",
+            date("%Y-%m-%d %H:%M:%S"), liftID, rowType,
+            GetServerTime(), absSync % cycle_s))
+    end
+    st.lastSync       = newSyncTime
     st.lastSyncSource = { name = name, realm = realm }
     if AldorTaxDB then
         if not AldorTaxDB.lifts then AldorTaxDB.lifts = {} end
@@ -911,9 +942,29 @@ local function OnRemoteDeath(p, count)
     end
 end
 
+-- Correction report: another player calibrated over a sync they had received,
+-- and is telling the zone how far off it was. Observability only — log it,
+-- and when the corrected sync originated from us, record the delta as an
+-- "FBCK" timing sample so /atax timing shows outbound accuracy alongside
+-- the RECV (inbound) group.
+local function OnRemoteCorrection(p)
+    local def = LIFTS[p.transportID]
+    if not def then return end
+    AppendSyncLog(string.format("%s|%s|FBCK:%s-%s>%s-%s|%.3f|%.3f|%.3f",
+        date("%Y-%m-%d %H:%M:%S"), p.transportID,
+        p.name, p.realm, p.srcName, p.srcRealm,
+        GetServerTime(), p.correction, p.recvOffset))
+    if p.srcName == (UnitName("player") or "") then
+        RecordTimingSample(p.transportID, GetServerTime(), p.recvOffset, p.correction, "FBCK")
+        Log(string.format("|cffffaa00AldorTax: %s corrected your %s sync by %+.2fs|r",
+            p.name, def.displayName, p.correction))
+    end
+end
+
 SyncBus.Init({
     onSync           = OnRemoteSync,
     onDeath          = OnRemoteDeath,
+    onCorrection     = OnRemoteCorrection,
     isKnownTransport = function(id) return LIFTS[id] ~= nil end,
 })
 
@@ -1299,7 +1350,18 @@ local function PerformCalibrationClick(liftID, phaseStart, label)
     local st  = liftState[liftID]
     if not def or not st then return end
     local now = GetTime() - CLICK_REACTION_TIME
-    LogSyncCorrection(liftID, now - phaseStart, label)
+    local prevSource = st.lastSyncSource -- SaveSync below clears it
+    local correction = LogSyncCorrection(liftID, now - phaseStart, label)
+    -- Close the feedback loop on received data: if the model this click just
+    -- corrected came from another player's broadcast, report the correction
+    -- size on the wire so the original sender can watch their own accuracy.
+    -- st.lastSync still holds the received model here (overwritten below).
+    if correction and prevSource and SyncBus.CanSend() then
+        local recvOffset = (st.lastSync + (serverTimeOffset or 0)) % def.cycleTime
+        SyncBus.Send(Wire.EncodeCorrection(liftID, recvOffset, correction,
+            UnitName("player") or "Unknown", GetRealmName() or "",
+            prevSource.name, prevSource.realm))
+    end
     -- Record timing sample even on first click (LogSyncCorrection skips when lastSync=0)
     if st.lastSync <= 0 then
         local absSync = (now - phaseStart) + (serverTimeOffset or 0)
@@ -1491,6 +1553,7 @@ BuildSyncUI = function()
 
     local segBtns = {}
     local segTextures = {}
+    syncUI.segBtns = segBtns -- exposed for tests, mirroring fallUI.segBtns
     local SEG_NAMES = { "FALL", "BOTTOM", "RISE", "TOP" }
 
     for i = 1, 4 do
