@@ -20,7 +20,7 @@ SyncBus.SOFT_BLOCK_THRESHOLD = 3
 SyncBus.HARD_BLOCK_THRESHOLD = 6
 
 -- Dispatch handlers, registered by the addon via SyncBus.Init.
-local onSync, onDeath, isKnownTransport
+local onSync, onDeath, onCorrection, isKnownTransport
 
 -- The addon owns the copyable log; route through it when present so module
 -- diagnostics land in the same place as everything else.
@@ -168,10 +168,13 @@ end
 --   onSync(parsed)           applies an accepted sync.
 --   onDeath(parsed, count)   reacts to a death report; count is the sender's
 --                            running death tally after recording this one.
+--   onCorrection(parsed)     logs a correction report (sync-accuracy feedback);
+--                            never mutates cycle state.
 --   isKnownTransport(id)     gates messages naming a transport we don't track.
 function SyncBus.Init(handlers)
     onSync           = handlers.onSync
     onDeath          = handlers.onDeath
+    onCorrection     = handlers.onCorrection
     isKnownTransport = handlers.isKnownTransport
 end
 
@@ -221,6 +224,12 @@ function SyncBus.Receive(prefix, message, chatType, sender)
         end
         local count = SyncBus.RecordDeathReport(parsed.name, parsed.realm)
         if onDeath then onDeath(parsed, count) end
+    elseif parsed.kind == "C" then
+        -- Correction reports are observability only — no cycle-state mutation —
+        -- so hard-block is the only gate worth applying.
+        if not (isKnownTransport and isKnownTransport(parsed.transportID)) then return end
+        if SyncBus.IsHardBlocked(parsed.name, parsed.realm) then return end
+        if onCorrection then onCorrection(parsed) end
     end
 end
 
