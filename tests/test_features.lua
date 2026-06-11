@@ -391,6 +391,10 @@ section("Test 16: ReconfigureLift resets bar geometry on lift transition")
 -- This exercises the LEGACY syncUI frame's dual-lift geometry self-heal, which
 -- is still the surface for dual lifts (TB/Great Lift) post-cutover. Single lifts
 -- no longer construct syncUI, so force it to build via the /atax ui toggle.
+-- The toggle only routes to syncUI when no single-form lift is active, so
+-- leave SSC (still active from Test 15) first.
+MockAPI.SetZone("Zangarmarsh", "Zangarmarsh")
+MockAPI.FireEvent("ZONE_CHANGED_NEW_AREA")
 if not _G.AldorTaxSyncUI then SlashCmdList["ALDORTAX"]("ui") end
 local syncUI = _G.AldorTaxSyncUI
 assert_true(syncUI ~= nil, "syncUI exists for transition test")

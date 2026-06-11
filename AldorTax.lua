@@ -930,8 +930,8 @@ local BuildSyncUI
 local configuredLiftID = nil
 
 -- Step 5b cutover flag: route single-form lifts (aldor/stormspire/ssc) to the
--- new LiftBar widget. Dual, tram, dev paths, and the /atax ui toggle stay on
--- the legacy syncUI surface for now. Flip to false to revert to all-legacy.
+-- new LiftBar widget. Dual, tram, and dev paths stay on the legacy syncUI
+-- surface for now. Flip to false to revert to all-legacy.
 local USE_NEW_LIFTBAR = true
 
 local function activeIsSingle()
@@ -4174,19 +4174,29 @@ SlashCmdList["ALDORTAX"] = function(msg)
         warnFrame:Hide()
         print("|cff00ff00AldorTax: Timer reset.|r")
     elseif msg == "ui" then
-        if not syncUI then
-            local ok, result = pcall(BuildSyncUI)
-            if ok then
-                syncUI = result
+        if activeIsSingle() then
+            -- Single-form lift active → LiftBar is the surface; toggle it.
+            if NS.LiftBar.IsShown() then
+                NS.LiftBar.Hide()
             else
-                print("|cffff0000AldorTax BuildSyncUI error: " .. tostring(result) .. "|r")
+                NS.LiftBar.Show(activeLiftID)
             end
-        end
-        if syncUI then
-            if activeLiftID and not syncUI.curLiftID then
-                syncUI.ReconfigureLift(activeLiftID)
+        else
+            -- No active lift, or dual/tram → legacy syncUI surface.
+            if not syncUI then
+                local ok, result = pcall(BuildSyncUI)
+                if ok then
+                    syncUI = result
+                else
+                    print("|cffff0000AldorTax BuildSyncUI error: " .. tostring(result) .. "|r")
+                end
             end
-            if syncUI:IsShown() then syncUI:Hide() else syncUI:Show() end
+            if syncUI then
+                if activeLiftID and not syncUI.curLiftID then
+                    syncUI.ReconfigureLift(activeLiftID)
+                end
+                if syncUI:IsShown() then syncUI:Hide() else syncUI:Show() end
+            end
         end
     elseif msg == "config" then
         if not optionsPanel then BuildOptionsPanel() end
