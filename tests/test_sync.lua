@@ -64,8 +64,8 @@ assert_near(syncDrift, 0, 0.1, "self-sync drift should be ~0")
 
 
 -- ─── Test 2: Sync with network latency ──────────────────────────────────────
--- Sender clicks at T=0. Message arrives 200ms later. With latency compensation,
--- the receiver should still compute phase ≈ 0.2 (200ms of progress since click).
+-- Sender clicks at T=0. Message arrives 200ms later. Because v5 syncs are
+-- anchored to absolute server time, transit delay must not shift the model.
 
 section("Test 2: Sync with 200ms world latency")
 
@@ -88,20 +88,16 @@ GetTime = function() return savedGetTime() + addedDelay end
 
 MockAPI.ReceiveAddonMessage("ALDORTAX", delayedMsg, "CHANNEL", "DelayedSender")
 
--- The receiver calls GetAbsoluteTime() - netDelay, where netDelay = 200/1000 = 0.2
--- So it effectively computes as if the message arrived 200ms ago, which is when it was sent.
--- elapsedInCycle should be ~0 (the 200ms transit is compensated by the 200ms latency subtraction)
--- But there's 200ms of real elapsed time, so without compensation phase would be 0.2
--- With compensation it should be ≈ 0.0
+-- srvPhase is anchored to absolute server time, which is delivery-delay-
+-- invariant: 200ms after sending, elapsedInCycle is genuinely 0.2, and
+-- lastSyncRealTime still resolves to the sender's cycle start. Applying
+-- latency compensation on this path would lag the model by ~netDelay.
 
--- Check stored sync: lastSyncRealTime should be close to the SEND time (not receive time)
+-- Check stored sync: lastSyncRealTime should be the SEND time (not receive time)
 local receiverRealTime = AldorTaxDB.lifts.aldor.lastSyncRealTime
--- The send-time real time would be expectedRealTime (before our 200ms advance)
--- With latency compensation, the stored time should reflect the sender's moment
--- Drift from the sender's actual cycle start:
 local senderCycleStart = expectedRealTime -- the real time when sender clicked
-local compensatedDrift = math.abs(receiverRealTime - senderCycleStart)
-assert_near(compensatedDrift, 0, 0.25, "latency-compensated drift should be small")
+local transitDrift = math.abs(receiverRealTime - senderCycleStart)
+assert_near(transitDrift, 0, 0.1, "absolute-anchored sync unaffected by 200ms transit")
 
 -- Restore GetTime
 GetTime = savedGetTime

@@ -441,9 +441,7 @@ assert_eq(syncUI.barBg:GetWidth(), 460 + 4,
 
 -- ─── Test 17: Received sync logged to syncLog with source ──────────────────
 -- Remote syncs must leave a durable trace: a RECV row carrying the sender
--- and the correction delta vs the local model. (Before this, receives were
--- invisible — only the latest lastSyncSource survived, until the next local
--- click erased it.)
+-- and the correction delta vs the local model.
 
 section("Test 17: Received sync logged to syncLog with source")
 

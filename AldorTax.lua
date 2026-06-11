@@ -871,18 +871,18 @@ local function ApplyRemoteSync(liftID, phase, name, realm, fall, bottom, rise, t
     local cycle_s = (fall and bottom and rise and top)
         and (fall + bottom + rise + top)
         or def.cycleTime
-    -- Compensate for network latency: the message was current when it left
-    -- the sender's client, but took ~latency ms to reach us via the server
-    -- GetNetStats: TBC+ returns (bwIn, bwOut, latencyHome, latencyWorld);
-    -- Vanilla Era returns (bwIn, bwOut, latency). Prefer world latency if present.
-    local _, _, latencyHome, latencyWorld = GetNetStats()
-    local netDelay = ((latencyWorld or latencyHome) or 0) / 1000 -- ms → seconds
     -- Prefer server-time phase if available (v5); fall back to local-time phase (v3/v4)
     local elapsedInCycle
     if srvPhase and serverTimeOffset then
-        local nowAbs = GetAbsoluteTime() - netDelay
-        elapsedInCycle = (nowAbs % cycle_s - srvPhase + cycle_s) % cycle_s
+        -- srvPhase is the cycle start anchored to absolute server time, which
+        -- is delivery-delay-invariant: no latency compensation here.
+        elapsedInCycle = (GetAbsoluteTime() % cycle_s - srvPhase + cycle_s) % cycle_s
     else
+        -- v3/v4 carry "phase as of send time", so transit delay matters here.
+        -- GetNetStats: TBC+ returns (bwIn, bwOut, latencyHome, latencyWorld);
+        -- Vanilla Era returns (bwIn, bwOut, latency). Prefer world latency.
+        local _, _, latencyHome, latencyWorld = GetNetStats()
+        local netDelay = ((latencyWorld or latencyHome) or 0) / 1000 -- ms → seconds
         local nowReal = GetRealTime() - netDelay
         elapsedInCycle = (nowReal % cycle_s - phase + cycle_s) % cycle_s
     end
