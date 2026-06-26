@@ -12,9 +12,11 @@ npc
 log.txt
 
 # Dev-only files
-.claude/
+.claude/*
+!.claude/skills/
 *.md
 !README.md
+!.claude/skills/**/*.md
 .venv/
 *.py
 *.png
